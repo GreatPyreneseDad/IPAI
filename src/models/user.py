@@ -6,6 +6,7 @@ This module defines the user data structure for the IPAI system.
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List
+import re
 from datetime import datetime
 from enum import Enum
 import uuid
@@ -17,6 +18,53 @@ class UserRole(Enum):
     PREMIUM = "premium"
     RESEARCHER = "researcher"
     ADMIN = "admin"
+
+
+@dataclass
+class UserPreferences:
+    """User preference settings"""
+
+    language: str = "en"
+    timezone: str = "UTC"
+    theme: str = "light"  # "light", "dark", or "auto"
+    notifications_enabled: bool = True
+    coherence_tracking: bool = True
+    privacy_level: str = "private"  # "public", "private", or "restricted"
+    data_sharing: bool = False
+    research_participation: bool = False
+
+    def __post_init__(self):
+        if self.language and not re.match(r"^[a-z]{2}$", self.language):
+            raise ValueError(f"Invalid language code: {self.language}")
+        if self.theme not in {"light", "dark", "auto"}:
+            raise ValueError(f"Invalid theme: {self.theme}")
+        if self.privacy_level not in {"public", "private", "restricted"}:
+            raise ValueError(f"Invalid privacy level: {self.privacy_level}")
+
+    def to_dict(self) -> Dict:
+        return {
+            "language": self.language,
+            "timezone": self.timezone,
+            "theme": self.theme,
+            "notifications_enabled": self.notifications_enabled,
+            "coherence_tracking": self.coherence_tracking,
+            "privacy_level": self.privacy_level,
+            "data_sharing": self.data_sharing,
+            "research_participation": self.research_participation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "UserPreferences":
+        return cls(
+            language=data.get("language", "en"),
+            timezone=data.get("timezone", "UTC"),
+            theme=data.get("theme", "light"),
+            notifications_enabled=data.get("notifications_enabled", True),
+            coherence_tracking=data.get("coherence_tracking", True),
+            privacy_level=data.get("privacy_level", "private"),
+            data_sharing=data.get("data_sharing", False),
+            research_participation=data.get("research_participation", False),
+        )
 
 
 @dataclass
@@ -39,7 +87,7 @@ class User:
     avatar_url: Optional[str] = None
     
     # Preferences
-    preferences: Dict = field(default_factory=dict)
+    preferences: UserPreferences | Dict = field(default_factory=UserPreferences)
     
     # Coherence tracking
     coherence_profiles_count: int = 0
@@ -69,7 +117,7 @@ class User:
             'full_name': self.full_name,
             'bio': self.bio,
             'avatar_url': self.avatar_url,
-            'preferences': self.preferences,
+            'preferences': self.preferences.to_dict() if isinstance(self.preferences, UserPreferences) else self.preferences,
             'coherence_profiles_count': self.coherence_profiles_count,
             'last_coherence_update': self.last_coherence_update.isoformat() if self.last_coherence_update else None
         }
@@ -90,7 +138,7 @@ class User:
             full_name=data.get('full_name'),
             bio=data.get('bio'),
             avatar_url=data.get('avatar_url'),
-            preferences=data.get('preferences', {}),
+            preferences=UserPreferences.from_dict(data['preferences']) if isinstance(data.get('preferences'), dict) else data.get('preferences', UserPreferences()),
             coherence_profiles_count=data.get('coherence_profiles_count', 0)
         )
         
