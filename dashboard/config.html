@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPAI Configuration - LLM & Wallet Setup</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-shadow {
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .tab-active {
+            border-bottom: 3px solid #667eea;
+            color: #667eea;
+        }
+        .provider-card {
+            transition: all 0.3s ease;
+        }
+        .provider-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+        }
+        .pulse-dot {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <div class="gradient-bg text-white p-6">
+        <div class="container mx-auto">
+            <h1 class="text-3xl font-bold flex items-center">
+                <i class="fas fa-cog mr-3"></i>
+                IPAI Configuration Center
+            </h1>
+            <p class="mt-2 text-purple-100">Configure your LLM providers and crypto wallets</p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-4 py-8">
+        <!-- Security Notice -->
+        <div id="security-notice" class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-lock text-yellow-400"></i>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-yellow-700">
+                        <strong>Security First:</strong> All API keys and private keys are encrypted locally. 
+                        Never share your configuration file or master password.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="bg-white rounded-lg card-shadow mb-6">
+            <div class="border-b border-gray-200">
+                <nav class="flex">
+                    <button onclick="showTab('llm')" id="llm-tab" class="px-6 py-4 text-gray-700 font-medium hover:text-purple-600 focus:outline-none tab-active">
+                        <i class="fas fa-brain mr-2"></i>LLM Providers
+                    </button>
+                    <button onclick="showTab('wallet')" id="wallet-tab" class="px-6 py-4 text-gray-700 font-medium hover:text-purple-600 focus:outline-none">
+                        <i class="fas fa-wallet mr-2"></i>Crypto Wallets
+                    </button>
+                    <button onclick="showTab('settings')" id="settings-tab" class="px-6 py-4 text-gray-700 font-medium hover:text-purple-600 focus:outline-none">
+                        <i class="fas fa-sliders-h mr-2"></i>Settings
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- LLM Tab Content -->
+        <div id="llm-content" class="tab-content">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Add LLM Provider -->
+                <div class="bg-white rounded-lg card-shadow p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">
+                        <i class="fas fa-plus-circle text-purple-600 mr-2"></i>Add LLM Provider
+                    </h2>
+                    
+                    <form id="llm-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Provider Name</label>
+                            <input type="text" id="llm-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" placeholder="e.g., My OpenAI" required>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Provider Type</label>
+                            <select id="llm-provider" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" onchange="updateLLMFields()">
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic Claude</option>
+                                <option value="google">Google Gemini</option>
+                                <option value="cohere">Cohere</option>
+                                <option value="together">Together AI</option>
+                                <option value="replicate">Replicate</option>
+                                <option value="huggingface">Hugging Face</option>
+                                <option value="groq">Groq</option>
+                                <option value="mistral">Mistral AI</option>
+                                <option value="ollama">Ollama (Local)</option>
+                                <option value="custom">Custom API</option>
+                            </select>
+                        </div>
+
+                        <div id="api-key-field">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                            <div class="relative">
+                                <input type="password" id="llm-api-key" class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" placeholder="sk-...">
+                                <button type="button" onclick="togglePasswordVisibility('llm-api-key')" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="api-base-field" style="display: none;">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">API Base URL</label>
+                            <input type="url" id="llm-api-base" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" placeholder="https://api.example.com/v1">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                            <select id="llm-model" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                                <!-- Models populated dynamically -->
+                            </select>
+                        </div>
+
+                        <button type="submit" class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition duration-200">
+                            <i class="fas fa-save mr-2"></i>Save LLM Provider
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Current LLM Providers -->
+                <div class="bg-white rounded-lg card-shadow p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">
+                        <i class="fas fa-list text-purple-600 mr-2"></i>Current Providers
+                    </h2>
+                    
+                    <div id="llm-list" class="space-y-3">
+                        <!-- Provider cards populated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wallet Tab Content -->
+        <div id="wallet-content" class="tab-content" style="display: none;">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Add Wallet -->
+                <div class="bg-white rounded-lg card-shadow p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">
+                        <i class="fas fa-plus-circle text-purple-600 mr-2"></i>Connect Wallet
+                    </h2>
+                    
+                    <form id="wallet-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Wallet Name</label>
+                            <input type="text" id="wallet-name" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" placeholder="e.g., My MetaMask" required>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Wallet Type</label>
+                            <select id="wallet-type" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" onchange="updateWalletFields()">
+                                <option value="metamask">MetaMask</option>
+                                <option value="walletconnect">WalletConnect</option>
+                                <option value="coinbase">Coinbase Wallet</option>
+                                <option value="phantom">Phantom</option>
+                                <option value="rainbow">Rainbow</option>
+                                <option value="trust">Trust Wallet</option>
+                                <option value="ledger">Ledger</option>
+                                <option value="trezor">Trezor</option>
+                                <option value="private_key">Private Key</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Network</label>
+                            <select id="wallet-network" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                                <option value="ethereum">Ethereum Mainnet</option>
+                                <option value="polygon">Polygon</option>
+                                <option value="arbitrum">Arbitrum</option>
+                                <option value="optimism">Optimism</option>
+                                <option value="bsc">BNB Smart Chain</option>
+                                <option value="avalanche">Avalanche</option>
+                                <option value="fantom">Fantom</option>
+                                <option value="local">Local Network</option>
+                            </select>
+                        </div>
+
+                        <div id="private-key-field" style="display: none;">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Private Key</label>
+                            <div class="relative">
+                                <input type="password" id="wallet-private-key" class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" placeholder="0x...">
+                                <button type="button" onclick="togglePasswordVisibility('wallet-private-key')" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <p class="text-xs text-red-600 mt-1">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>
+                                Never share your private key. It will be encrypted locally.
+                            </p>
+                        </div>
+
+                        <div id="connect-wallet-button" class="hidden">
+                            <button type="button" onclick="connectBrowserWallet()" class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition duration-200">
+                                <i class="fas fa-link mr-2"></i>Connect Wallet
+                            </button>
+                        </div>
+
+                        <button type="submit" class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition duration-200">
+                            <i class="fas fa-save mr-2"></i>Save Wallet
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Current Wallets -->
+                <div class="bg-white rounded-lg card-shadow p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">
+                        <i class="fas fa-list text-purple-600 mr-2"></i>Connected Wallets
+                    </h2>
+                    
+                    <div id="wallet-list" class="space-y-3">
+                        <!-- Wallet cards populated dynamically -->
+                    </div>
+
+                    <!-- SAGE Balance -->
+                    <div class="mt-6 p-4 bg-purple-50 rounded-lg">
+                        <h3 class="font-semibold text-purple-800 mb-2">
+                            <i class="fas fa-coins mr-2"></i>SAGE Token Balance
+                        </h3>
+                        <div id="sage-balance" class="text-2xl font-bold text-purple-600">
+                            0.00 SAGE
+                        </div>
+                        <button onclick="claimDailySAGE()" class="mt-2 text-sm bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700">
+                            Claim Daily Reward
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab Content -->
+        <div id="settings-content" class="tab-content" style="display: none;">
+            <div class="max-w-2xl mx-auto">
+                <div class="bg-white rounded-lg card-shadow p-6">
+                    <h2 class="text-xl font-bold mb-4 text-gray-800">
+                        <i class="fas fa-cog text-purple-600 mr-2"></i>General Settings
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="flex items-center space-x-3">
+                                <input type="checkbox" id="auto-connect-wallet" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
+                                <span class="text-gray-700">Auto-connect wallet on startup</span>
+                            </label>
+                        </div>
+
+                        <div>
+                            <label class="flex items-center space-x-3">
+                                <input type="checkbox" id="coherence-tracking" class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500" checked>
+                                <span class="text-gray-700">Enable coherence tracking</span>
+                            </label>
+                        </div>
+
+                        <div class="border-t pt-4">
+                            <h3 class="font-semibold text-gray-800 mb-2">Default Providers</h3>
+                            
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Default LLM</label>
+                                    <select id="default-llm" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                                        <option value="">None</option>
+                                        <!-- Options populated dynamically -->
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Wallet</label>
+                                    <select id="default-wallet" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                                        <option value="">None</option>
+                                        <!-- Options populated dynamically -->
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="border-t pt-4">
+                            <h3 class="font-semibold text-gray-800 mb-2">Security</h3>
+                            
+                            <button onclick="changePassword()" class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition duration-200">
+                                <i class="fas fa-key mr-2"></i>Change Master Password
+                            </button>
+                        </div>
+
+                        <div class="border-t pt-4">
+                            <button onclick="saveSettings()" class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition duration-200">
+                                <i class="fas fa-save mr-2"></i>Save Settings
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50"></div>
+
+    <!-- Scripts -->
+    <script src="config.js"></script>
+</body>
+</html>

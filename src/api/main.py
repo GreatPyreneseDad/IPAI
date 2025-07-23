@@ -41,11 +41,11 @@ from .exceptions import (
 
 # Router imports (will be created)
 try:
-    from .v1 import coherence, llm, identity, assessment, analytics, safety
+    from .v1 import coherence, llm, identity, assessment, analytics, safety, config
 except ImportError:
     # Temporary placeholder for development
     logger.warning("Some router modules not found - using placeholder routers")
-    coherence = llm = identity = assessment = analytics = safety = type('Router', (), {'router': None})()
+    coherence = llm = identity = assessment = analytics = safety = config = type('Router', (), {'router': None})()
 
 # Configure logging
 logging.basicConfig(
@@ -239,6 +239,8 @@ def setup_routes(app: FastAPI):
         app.include_router(analytics.router, prefix=f"{api_prefix}/analytics", tags=["Analytics"])
     if hasattr(safety, 'router') and safety.router:
         app.include_router(safety.router, prefix=f"{api_prefix}/safety", tags=["Safety"])
+    if hasattr(config, 'router') and config.router:
+        app.include_router(config.router, prefix=f"{api_prefix}/config", tags=["Configuration"])
 
 
 def setup_static_files(app: FastAPI, settings: Settings):
