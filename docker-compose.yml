@@ -1,60 +1,20 @@
-# IPAI System Docker Compose Configuration
-# Complete development and production environment setup
-
 version: '3.8'
 
 services:
-  # Main IPAI Application
-  ipai-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: development
-    ports:
-      - "8000:8000"
-    environment:
-      - ENVIRONMENT=development
-      - DEBUG=true
-      - DATABASE_URL=postgresql://ipai_user:ipai_password@postgres:5432/ipai_db
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=development-secret-key-change-in-production
-      - JWT_SECRET=development-jwt-secret
-      - ENCRYPTION_KEY=development-encryption-key-32-bytes
-    volumes:
-      - .:/app
-      - ipai_uploads:/app/uploads
-      - ipai_logs:/app/logs
-      - ipai_models:/app/models
-    depends_on:
-      - postgres
-      - redis
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
+    container_name: ipai-postgres
     environment:
-      - POSTGRES_DB=ipai_db
-      - POSTGRES_USER=ipai_user
-      - POSTGRES_PASSWORD=ipai_password
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ipai
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: ipai
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
-    networks:
-      - ipai-network
-    restart: unless-stopped
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ipai_user -d ipai_db"]
+      test: ["CMD-SHELL", "pg_isready -U ipai"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,280 +22,95 @@ services:
   # Redis Cache
   redis:
     image: redis:7-alpine
+    container_name: ipai-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    networks:
-      - ipai-network
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+      retries: 5
 
-  # Blockchain Node (Ganache for development)
-  ganache:
-    image: trufflesuite/ganache:latest
+  # Ollama LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ipai-ollama
     ports:
-      - "8545:8545"
-    command: >
-      ganache
-      --host 0.0.0.0
-      --port 8545
-      --deterministic
-      --accounts 10
-      --defaultBalanceEther 1000
-      --gasLimit 10000000
-      --gasPrice 20000000000
-    networks:
-      - ipai-network
-    restart: unless-stopped
-
-  # Monitoring - Prometheus
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
+      - "11434:11434"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    networks:
-      - ipai-network
-    restart: unless-stopped
-
-  # Monitoring - Grafana
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-
-  # Log Aggregation - ELK Stack (optional)
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - logging
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.0
-    ports:
-      - "5601:5601"
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    depends_on:
-      - elasticsearch
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - logging
-
-  # Message Queue - RabbitMQ (optional)
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=ipai
-      - RABBITMQ_DEFAULT_PASS=ipai_password
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - queue
-
-  # Nginx Reverse Proxy (production)
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ipai_static:/var/www/static:ro
-    depends_on:
-      - ipai-api
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - production
-
-  # Database Administration - pgAdmin
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@ipai.local
-      - PGADMIN_DEFAULT_PASSWORD=admin
-    ports:
-      - "8080:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - postgres
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - admin
-
-  # Redis Administration - Redis Commander
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    environment:
-      - REDIS_HOSTS=local:redis:6379
-    ports:
-      - "8081:8081"
-    depends_on:
-      - redis
-    networks:
-      - ipai-network
-    restart: unless-stopped
-    profiles:
-      - admin
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  ipai_uploads:
-    driver: local
-  ipai_logs:
-    driver: local
-  ipai_models:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local
-  elasticsearch_data:
-    driver: local
-  rabbitmq_data:
-    driver: local
-  pgadmin_data:
-    driver: local
-  ipai_static:
-    driver: local
-
-networks:
-  ipai-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-
-# Additional compose files for different environments
-# Use: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
-
----
-# docker-compose.prod.yml (production overrides)
-version: '3.8'
-
-services:
-  ipai-api:
-    build:
-      target: production
-    environment:
-      - ENVIRONMENT=production
-      - DEBUG=false
-      - WORKERS=4
-    restart: always
-    deploy:
-      replicas: 2
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '1.0'
-          memory: 1G
-
-  postgres:
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-
-  redis:
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-
----
-# docker-compose.test.yml (testing overrides)
-version: '3.8'
-
-services:
-  ipai-api:
-    build:
-      target: testing
-    environment:
-      - ENVIRONMENT=testing
-      - DATABASE_URL=postgresql://ipai_user:ipai_password@postgres:5432/ipai_test_db
-      - REDIS_URL=redis://redis:6379/1
-    command: ["pytest", "tests/", "-v", "--cov=src"]
-
-  postgres:
-    environment:
-      - POSTGRES_DB=ipai_test_db
-
----
-# docker-compose.gpu.yml (GPU support)
-version: '3.8'
-
-services:
-  ipai-api:
-    build:
-      target: gpu-production
+      - ollama_data:/root/.ollama
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ipai-backend
+    environment:
+      DATABASE_URL: postgresql://ipai:${DB_PASSWORD:-changeme}@postgres:5432/ipai
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_HOST: http://ollama:11434
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    command: >
+      sh -c "
+        python scripts/setup_database.py &&
+        uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ipai-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+
+  # PgAdmin (Optional - for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ipai-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@ipai.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+
+networks:
+  default:
+    name: ipai-network

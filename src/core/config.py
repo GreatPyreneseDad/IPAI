@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     JWT_SECRET: str = Field("", description="JWT secret key")
     JWT_ALGORITHM: str = Field("HS256", description="JWT algorithm")
     JWT_EXPIRATION_HOURS: int = Field(24, description="JWT expiration time in hours")
+    ALGORITHM: str = Field("HS256", description="JWT algorithm alias for auth module")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(30, description="Access token expiration in minutes")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(7, description="Refresh token expiration in days")
+    FRONTEND_URL: str = Field("http://localhost:3000", description="Frontend URL for links in emails")
     ENCRYPTION_KEY: Optional[str] = Field(None, description="Encryption key for sensitive data")
     
     # Database settings

@@ -1,516 +1,566 @@
 """
-LLM API Endpoints
+LLM Integration API Endpoints
 
-This module provides REST endpoints for LLM interactions
-with GCT-aware processing and coherence analysis.
+This module provides REST endpoints for LLM interactions,
+chat functionality, and AI-powered features.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from fastapi.responses import StreamingResponse
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, WebSocket, WebSocketDisconnect
+from typing import Dict, List, Optional, Any, AsyncGenerator
 from datetime import datetime
+from pydantic import BaseModel, Field
 import asyncio
 import json
 
 from ...models.user import User
-from ...models.coherence_profile import CoherenceProfile
-from ...llm.interface import GCTLLMInterface, LLMResponse
-from ...llm.coherence_analyzer import CoherenceAnalysis
+from ...models.database_models import UserInteraction, InteractionType
+from ...integrations.llm_providers import LLMManager
+from ...safety.enhanced_coherence_tracker import EnhancedCoherenceTracker
+from ...blockchain.personal_chain import PersonalBlockchain
+from ...llm.coherence_analyzer import CoherenceAnalyzer
+from ...llm.triadic_handler import TriadicResponseHandler
 from ...core.database import Database
-from ..dependencies import (
-    get_current_active_user, get_database, get_llm_interface,
-    require_feature_access, get_user_coherence_profile, require_user_coherence_profile,
-    llm_rate_limit, get_request_context
-)
+from ..dependencies import get_current_active_user, get_database
 
 router = APIRouter(prefix="/llm")
 
+# Global managers
+llm_manager = LLMManager()
+user_sessions: Dict[str, Dict[str, Any]] = {}
+
+
 # Pydantic models
 
+class ChatMessage(BaseModel):
+    """Chat message model"""
+    content: str = Field(..., min_length=1, max_length=10000)
+    role: str = Field("user", regex="^(user|assistant|system)$")
+    metadata: Optional[Dict[str, Any]] = None
+
+
 class ChatRequest(BaseModel):
-    """Request model for chat interactions"""
-    message: str = Field(..., min_length=1, max_length=2000, description="User message")
-    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
-    stream: Optional[bool] = Field(True, description="Enable streaming response")
-    include_analysis: Optional[bool] = Field(False, description="Include coherence analysis")
-
-
-class CoherenceCheckRequest(BaseModel):
-    """Request model for coherence checking"""
-    message: str = Field(..., min_length=1, max_length=2000, description="Message to analyze")
-    detailed: Optional[bool] = Field(False, description="Include detailed analysis")
-
-
-class InterventionRequest(BaseModel):
-    """Request model for intervention recommendations"""
-    focus_area: Optional[str] = Field(None, description="Specific focus area")
-    urgency: Optional[str] = Field("normal", description="Urgency level")
+    """Chat request model"""
+    message: str = Field(..., min_length=1, max_length=5000)
+    context: Optional[List[ChatMessage]] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: float = Field(0.7, ge=0, le=2)
+    max_tokens: int = Field(2000, ge=1, le=10000)
+    stream: bool = False
 
 
 class ChatResponse(BaseModel):
-    """Response model for chat interactions"""
-    response: str
-    coherence_analysis: Optional[Dict[str, Any]] = None
-    processing_metadata: Dict[str, Any]
-    timestamp: datetime
-    user_id: str
+    """Chat response model"""
+    message: str
+    coherence_impact: float
+    safety_score: float
+    metadata: Dict[str, Any]
 
 
-class CoherenceAnalysisResponse(BaseModel):
-    """Response model for coherence analysis"""
-    psi_score: float
-    rho_score: float
-    q_score: float
-    f_score: float
-    overall_coherence: float
-    red_flags: List[str]
-    positive_indicators: List[str]
-    needs_grounding: bool
-    confidence: float
-    recommendations: List[str]
+class AnalysisRequest(BaseModel):
+    """Analysis request model"""
+    text: str = Field(..., min_length=1, max_length=10000)
+    analysis_type: str = Field(..., regex="^(coherence|sentiment|themes|summary)$")
+    depth: str = Field("standard", regex="^(quick|standard|deep)$")
 
 
-class ConversationHistoryResponse(BaseModel):
-    """Response model for conversation history"""
-    conversations: List[Dict[str, Any]]
-    total_count: int
-    page_info: Dict[str, Any]
+class CompletionRequest(BaseModel):
+    """Completion request model"""
+    prompt: str = Field(..., min_length=1, max_length=5000)
+    system_prompt: Optional[str] = None
+    examples: Optional[List[Dict[str, str]]] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: float = Field(0.7, ge=0, le=2)
+    max_tokens: int = Field(1000, ge=1, le=10000)
+
+
+# Helper functions
+
+def get_user_session(user_id: str) -> Dict[str, Any]:
+    """Get or create user session"""
+    if user_id not in user_sessions:
+        user_sessions[user_id] = {
+            "conversation_history": [],
+            "coherence_tracker": EnhancedCoherenceTracker(),
+            "personal_chain": PersonalBlockchain(user_id, f"ipai_{user_id}"),
+            "triadic_handler": TriadicResponseHandler(),
+            "last_interaction": datetime.utcnow()
+        }
+    return user_sessions[user_id]
+
+
+async def process_chat_message(
+    user_id: str,
+    message: str,
+    session: Dict[str, Any],
+    db: Database,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: float = 0.7,
+    max_tokens: int = 2000
+) -> Dict[str, Any]:
+    """Process a chat message with coherence tracking"""
+    
+    # Get LLM response
+    llm_response = await llm_manager.complete(
+        prompt=message,
+        provider=provider,
+        temperature=temperature,
+        max_tokens=max_tokens
+    )
+    
+    # Apply triadic processing for coherence
+    processed_response = session["triadic_handler"].process_response(
+        user_input=message,
+        llm_response=llm_response,
+        coherence_level=session["coherence_tracker"].current_psi
+    )
+    
+    # Update coherence tracking
+    coherence_snapshot = await session["coherence_tracker"].update_coherence_with_safety(
+        delta_psi=processed_response.get("coherence_delta", 0.01),
+        user_input=message,
+        ai_response=processed_response["response"],
+        event_type="chat",
+        trigger="llm_interaction",
+        ambiguity_level=processed_response.get("ambiguity_level", 0.3)
+    )
+    
+    # Add to personal blockchain
+    block = await session["personal_chain"].add_interaction(
+        user_input=message,
+        ai_response=processed_response["response"],
+        coherence_score=coherence_snapshot.psi_value,
+        soul_echo=coherence_snapshot.psi_value,
+        safety_score=coherence_snapshot.safety_metrics.safety_score,
+        inference_data={
+            "type": "chat",
+            "triadic_processing": processed_response.get("triadic_components", {}),
+            "provider": provider or llm_manager.active_provider,
+            "model": model
+        }
+    )
+    
+    # Save interaction to database
+    interaction = UserInteraction(
+        user_id=user_id,
+        interaction_type=InteractionType.CHAT,
+        input_text=message,
+        output_text=processed_response["response"],
+        coherence_before=coherence_snapshot.psi_value - processed_response.get("coherence_delta", 0),
+        coherence_after=coherence_snapshot.psi_value,
+        coherence_delta=processed_response.get("coherence_delta", 0),
+        safety_score=coherence_snapshot.safety_metrics.safety_score,
+        howlround_risk=coherence_snapshot.safety_metrics.howlround_risk,
+        pressure_score=coherence_snapshot.pressure_metrics.pressure_score,
+        intervention_triggered=coherence_snapshot.safety_metrics.intervention_needed,
+        llm_provider=provider or llm_manager.active_provider,
+        llm_model=model,
+        block_hash=block.hash
+    )
+    
+    await db.add_interaction(interaction)
+    
+    # Update conversation history
+    session["conversation_history"].append({
+        "role": "user",
+        "content": message,
+        "timestamp": datetime.utcnow()
+    })
+    session["conversation_history"].append({
+        "role": "assistant",
+        "content": processed_response["response"],
+        "timestamp": datetime.utcnow()
+    })
+    
+    # Trim history if too long
+    if len(session["conversation_history"]) > 50:
+        session["conversation_history"] = session["conversation_history"][-40:]
+    
+    return {
+        "response": processed_response["response"],
+        "coherence_impact": processed_response.get("coherence_delta", 0),
+        "safety_score": coherence_snapshot.safety_metrics.safety_score,
+        "intervention_log": coherence_snapshot.intervention_log,
+        "block_hash": block.hash,
+        "metadata": {
+            "triadic_components": processed_response.get("triadic_components", {}),
+            "current_coherence": coherence_snapshot.psi_value,
+            "coherence_state": coherence_snapshot.state.label,
+            "relationship_quality": coherence_snapshot.relationship_quality
+        }
+    }
 
 
 # Endpoints
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_llm(
+async def chat(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_feature_access("llm_integration")),
-    profile: CoherenceProfile = Depends(require_user_coherence_profile),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface),
-    db: Database = Depends(get_database),
-    context: Dict = Depends(get_request_context),
-    _: bool = Depends(llm_rate_limit)
+    current_user: User = Depends(get_current_active_user),
+    db: Database = Depends(get_database)
 ):
-    """Chat with GCT-aware LLM"""
-    
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
+    """Chat with LLM with coherence tracking"""
     
     try:
-        # Merge request context with user context
-        full_context = {**request.context, **context}
+        session = get_user_session(current_user.id)
         
-        # Generate response
-        if request.stream:
-            # Handle streaming in separate endpoint
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Use /chat/stream endpoint for streaming responses"
-            )
-        else:
-            llm_response = await llm_interface.generate_response(
-                request.message,
-                profile,
-                full_context,
-                stream=False
-            )
+        # Add context to conversation if provided
+        if request.context:
+            for msg in request.context:
+                session["conversation_history"].append({
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": datetime.utcnow()
+                })
         
-        # Save conversation to database
+        # Build full prompt with history
+        full_prompt = build_conversation_prompt(
+            message=request.message,
+            history=session["conversation_history"][-10:]  # Last 10 messages
+        )
+        
+        # Process message
+        result = await process_chat_message(
+            user_id=current_user.id,
+            message=full_prompt,
+            session=session,
+            db=db,
+            provider=request.provider,
+            model=request.model,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+        
+        # Update user coherence in background
         background_tasks.add_task(
-            save_conversation, 
-            db, 
-            current_user.id, 
-            request.message, 
-            llm_response
+            update_user_coherence,
+            db,
+            current_user.id,
+            result["metadata"]["current_coherence"]
         )
         
-        # Prepare response
-        response = ChatResponse(
-            response=llm_response.processed_text,
-            coherence_analysis=format_coherence_analysis(llm_response) if request.include_analysis else None,
-            processing_metadata=llm_response.processing_metadata,
-            timestamp=llm_response.timestamp,
-            user_id=current_user.id
+        return ChatResponse(
+            message=result["response"],
+            coherence_impact=result["coherence_impact"],
+            safety_score=result["safety_score"],
+            metadata=result["metadata"]
         )
-        
-        return response
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate response"
+            detail=f"Chat processing failed: {str(e)}"
         )
 
 
-@router.post("/chat/stream")
-async def stream_chat_with_llm(
-    request: ChatRequest,
-    current_user: User = Depends(require_feature_access("llm_integration")),
-    profile: CoherenceProfile = Depends(require_user_coherence_profile),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface),
-    context: Dict = Depends(get_request_context),
-    _: bool = Depends(llm_rate_limit)
+@router.websocket("/chat/stream")
+async def chat_stream(
+    websocket: WebSocket,
+    token: str
 ):
-    """Stream chat response from GCT-aware LLM"""
+    """WebSocket endpoint for streaming chat"""
     
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
+    await websocket.accept()
     
     try:
-        # Merge contexts
-        full_context = {**request.context, **context}
+        # Authenticate user
+        user = await authenticate_websocket(token)
+        if not user:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
         
-        # Generate streaming response
-        async def generate_stream():
+        session = get_user_session(user.id)
+        
+        while True:
+            # Receive message
+            data = await websocket.receive_json()
+            
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+            
+            message = data.get("message", "")
+            if not message:
+                continue
+            
+            # Stream response
+            full_response = ""
+            coherence_delta = 0
+            
             try:
-                async for chunk in await llm_interface.generate_response(
-                    request.message,
-                    profile, 
-                    full_context,
-                    stream=True
+                async for chunk in llm_manager.stream_complete(
+                    prompt=message,
+                    provider=data.get("provider"),
+                    temperature=data.get("temperature", 0.7),
+                    max_tokens=data.get("max_tokens", 2000)
                 ):
-                    # Format as Server-Sent Events
-                    yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+                    full_response += chunk
+                    await websocket.send_json({
+                        "type": "chunk",
+                        "content": chunk
+                    })
                 
-                # Send completion signal
-                yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+                # Process complete response for coherence
+                processed = session["triadic_handler"].process_response(
+                    user_input=message,
+                    llm_response=full_response,
+                    coherence_level=session["coherence_tracker"].current_psi
+                )
+                
+                # Update coherence
+                snapshot = await session["coherence_tracker"].update_coherence_with_safety(
+                    delta_psi=processed.get("coherence_delta", 0.01),
+                    user_input=message,
+                    ai_response=full_response,
+                    event_type="chat",
+                    trigger="stream_interaction",
+                    ambiguity_level=processed.get("ambiguity_level", 0.3)
+                )
+                
+                # Send completion message
+                await websocket.send_json({
+                    "type": "complete",
+                    "coherence_impact": processed.get("coherence_delta", 0),
+                    "safety_score": snapshot.safety_metrics.safety_score,
+                    "metadata": {
+                        "current_coherence": snapshot.psi_value,
+                        "coherence_state": snapshot.state.label
+                    }
+                })
                 
             except Exception as e:
-                # Send error signal
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        
-        return StreamingResponse(
-            generate_stream(),
-            media_type="text/plain",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/plain; charset=utf-8"
-            }
-        )
-        
+                await websocket.send_json({
+                    "type": "error",
+                    "error": str(e)
+                })
+                
+    except WebSocketDisconnect:
+        pass
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to start streaming response"
-        )
+        await websocket.close(code=4000, reason=str(e))
 
 
-@router.post("/coherence-check", response_model=CoherenceAnalysisResponse)
-async def check_message_coherence(
-    request: CoherenceCheckRequest,
-    current_user: User = Depends(get_current_active_user),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface),
-    _: bool = Depends(llm_rate_limit)
+@router.post("/analyze")
+async def analyze_text(
+    request: AnalysisRequest,
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Analyze message coherence"""
-    
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
+    """Analyze text for various insights"""
     
     try:
-        # Analyze message coherence
-        analysis = await llm_interface.check_message_coherence(request.message)
+        analyzer = CoherenceAnalyzer()
         
-        # Generate recommendations based on analysis
-        recommendations = generate_coherence_recommendations(analysis)
-        
-        return CoherenceAnalysisResponse(
-            psi_score=analysis.psi_score,
-            rho_score=analysis.rho_score,
-            q_score=analysis.q_score,
-            f_score=analysis.f_score,
-            overall_coherence=analysis.overall_coherence,
-            red_flags=analysis.red_flags,
-            positive_indicators=analysis.positive_indicators,
-            needs_grounding=analysis.needs_grounding,
-            confidence=analysis.confidence,
-            recommendations=recommendations
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to analyze message coherence"
-        )
-
-
-@router.post("/intervention")
-async def get_llm_intervention(
-    request: InterventionRequest,
-    current_user: User = Depends(require_feature_access("advanced_analytics")),
-    profile: CoherenceProfile = Depends(require_user_coherence_profile),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface)
-):
-    """Get LLM-generated intervention recommendations"""
-    
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
-    
-    try:
-        # Generate intervention recommendations
-        intervention_prompt = llm_interface.generate_intervention_recommendations(profile)
-        
-        # Get LLM response for intervention
-        context = {
-            'intervention_request': True,
-            'focus_area': request.focus_area,
-            'urgency': request.urgency
-        }
-        
-        response = await llm_interface.generate_response(
-            f"Please provide intervention recommendations based on my coherence profile. Focus area: {request.focus_area or 'general'}",
-            profile,
-            context,
-            stream=False
-        )
+        if request.analysis_type == "coherence":
+            result = await analyzer.analyze_coherence(
+                request.text,
+                depth=request.depth
+            )
+        elif request.analysis_type == "sentiment":
+            result = await analyzer.analyze_sentiment(request.text)
+        elif request.analysis_type == "themes":
+            result = await analyzer.extract_themes(request.text)
+        elif request.analysis_type == "summary":
+            result = await analyzer.generate_summary(
+                request.text,
+                style=request.depth
+            )
+        else:
+            raise ValueError(f"Unknown analysis type: {request.analysis_type}")
         
         return {
-            "intervention_text": response.processed_text,
-            "focus_area": request.focus_area or "general",
-            "urgency": request.urgency,
-            "coherence_level": profile.level.value,
+            "analysis_type": request.analysis_type,
+            "result": result,
             "timestamp": datetime.utcnow()
         }
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate intervention recommendations"
+            detail=f"Analysis failed: {str(e)}"
         )
 
 
-@router.get("/conversation-history", response_model=ConversationHistoryResponse)
-async def get_conversation_history(
-    limit: int = Field(20, ge=1, le=100),
-    offset: int = Field(0, ge=0),
-    current_user: User = Depends(get_current_active_user),
-    db: Database = Depends(get_database)
+@router.post("/complete")
+async def complete_prompt(
+    request: CompletionRequest,
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Get conversation history"""
+    """Complete a prompt with optional examples"""
     
     try:
-        conversations, total_count = await db.get_conversation_history(
-            current_user.id,
-            limit=limit,
-            offset=offset
+        # Build full prompt with system and examples
+        full_prompt = build_completion_prompt(
+            prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            examples=request.examples
         )
         
-        return ConversationHistoryResponse(
-            conversations=conversations,
-            total_count=total_count,
-            page_info={
-                "limit": limit,
-                "offset": offset,
-                "has_more": offset + limit < total_count
-            }
+        # Get completion
+        response = await llm_manager.complete(
+            prompt=full_prompt,
+            provider=request.provider,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
         )
+        
+        return {
+            "completion": response,
+            "prompt_tokens": estimate_tokens(full_prompt),
+            "completion_tokens": estimate_tokens(response),
+            "model": request.model or "default",
+            "timestamp": datetime.utcnow()
+        }
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve conversation history"
+            detail=f"Completion failed: {str(e)}"
         )
+
+
+@router.get("/models")
+async def list_available_models(
+    current_user: User = Depends(get_current_active_user)
+):
+    """List available LLM models"""
+    
+    providers = llm_manager.list_providers()
+    models_by_provider = {}
+    
+    for provider in providers:
+        provider_type = provider["provider"]
+        models = llm_manager.get_provider_models(provider_type)
+        models_by_provider[provider["name"]] = {
+            "provider_type": provider_type,
+            "models": models,
+            "active": provider["active"]
+        }
+    
+    return {
+        "providers": models_by_provider,
+        "active_provider": llm_manager.active_provider
+    }
+
+
+@router.post("/set-provider")
+async def set_active_provider(
+    provider_name: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Set the active LLM provider"""
+    
+    try:
+        llm_manager.set_active_provider(provider_name)
+        
+        return {
+            "status": "success",
+            "active_provider": provider_name
+        }
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.get("/conversation-history")
+async def get_conversation_history(
+    limit: int = 50,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get user's conversation history"""
+    
+    session = get_user_session(current_user.id)
+    history = session["conversation_history"][-limit:]
+    
+    return {
+        "history": history,
+        "total_messages": len(session["conversation_history"]),
+        "session_start": session.get("session_start", datetime.utcnow())
+    }
 
 
 @router.delete("/conversation-history")
 async def clear_conversation_history(
-    current_user: User = Depends(get_current_active_user),
-    db: Database = Depends(get_database)
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Clear conversation history"""
+    """Clear user's conversation history"""
     
-    try:
-        await db.clear_conversation_history(current_user.id)
-        
-        return {
-            "status": "success",
-            "message": "Conversation history cleared",
-            "timestamp": datetime.utcnow()
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to clear conversation history"
-        )
-
-
-@router.get("/performance-metrics")
-async def get_llm_performance_metrics(
-    current_user: User = Depends(require_feature_access("advanced_analytics")),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface)
-):
-    """Get LLM performance metrics"""
-    
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
-    
-    try:
-        metrics = llm_interface.get_performance_metrics()
-        
-        return {
-            "performance_metrics": metrics,
-            "timestamp": datetime.utcnow(),
-            "user_id": current_user.id
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve performance metrics"
-        )
-
-
-@router.post("/reflection-exercise")
-async def generate_reflection_exercise(
-    focus_area: str = Field(..., description="Area for reflection"),
-    current_user: User = Depends(get_current_active_user),
-    profile: CoherenceProfile = Depends(require_user_coherence_profile),
-    llm_interface: Optional[GCTLLMInterface] = Depends(get_llm_interface)
-):
-    """Generate personalized reflection exercise"""
-    
-    if not llm_interface:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM service is currently unavailable"
-        )
-    
-    try:
-        # Generate reflection prompt
-        reflection_prompt = llm_interface.prompt_generator.generate_reflection_prompt(
-            focus_area, profile
-        )
-        
-        # Generate reflection exercise
-        context = {
-            'reflection_exercise': True,
-            'focus_area': focus_area
-        }
-        
-        response = await llm_interface.generate_response(
-            reflection_prompt,
-            profile,
-            context,
-            stream=False
-        )
-        
-        return {
-            "exercise": response.processed_text,
-            "focus_area": focus_area,
-            "coherence_level": profile.level.value,
-            "estimated_duration": "10-15 minutes",
-            "timestamp": datetime.utcnow()
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate reflection exercise"
-        )
-
-
-# Background task functions
-
-async def save_conversation(
-    db: Database,
-    user_id: str,
-    user_message: str,
-    llm_response: LLMResponse
-):
-    """Background task to save conversation"""
-    try:
-        await db.save_conversation(
-            user_id=user_id,
-            user_message=user_message,
-            assistant_response=llm_response.processed_text,
-            coherence_analysis=llm_response.response_analysis.coherence_analysis if llm_response.response_analysis else None,
-            processing_metadata=llm_response.processing_metadata,
-            timestamp=llm_response.timestamp
-        )
-    except Exception as e:
-        print(f"Failed to save conversation: {e}")
-
-
-# Utility functions
-
-def format_coherence_analysis(llm_response: LLMResponse) -> Optional[Dict[str, Any]]:
-    """Format coherence analysis for API response"""
-    
-    if not llm_response.response_analysis or not llm_response.response_analysis.coherence_analysis:
-        return None
-    
-    analysis = llm_response.response_analysis.coherence_analysis
+    session = get_user_session(current_user.id)
+    session["conversation_history"] = []
+    session["session_start"] = datetime.utcnow()
     
     return {
-        "psi_score": analysis.psi_score,
-        "rho_score": analysis.rho_score,
-        "q_score": analysis.q_score,
-        "f_score": analysis.f_score,
-        "overall_coherence": analysis.overall_coherence,
-        "red_flags": analysis.red_flags,
-        "positive_indicators": analysis.positive_indicators,
-        "needs_grounding": analysis.needs_grounding,
-        "confidence": analysis.confidence
+        "status": "success",
+        "message": "Conversation history cleared"
     }
 
 
-def generate_coherence_recommendations(analysis: CoherenceAnalysis) -> List[str]:
-    """Generate recommendations based on coherence analysis"""
+# Helper functions
+
+def build_conversation_prompt(message: str, history: List[Dict]) -> str:
+    """Build a conversation prompt with history"""
+    prompt_parts = []
     
-    recommendations = []
+    # Add relevant history
+    for msg in history[-5:]:  # Last 5 messages
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user":
+            prompt_parts.append(f"User: {content}")
+        elif role == "assistant":
+            prompt_parts.append(f"Assistant: {content}")
     
-    # Component-specific recommendations
-    if analysis.psi_score < 0.4:
-        recommendations.append("Focus on aligning your thoughts and actions for greater internal consistency")
+    # Add current message
+    prompt_parts.append(f"User: {message}")
+    prompt_parts.append("Assistant:")
     
-    if analysis.rho_score < 0.4:
-        recommendations.append("Practice regular reflection to integrate experiences and build wisdom")
+    return "\n\n".join(prompt_parts)
+
+
+def build_completion_prompt(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    examples: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """Build a completion prompt with system message and examples"""
+    parts = []
     
-    if analysis.q_score < 0.4:
-        recommendations.append("Clarify your values and commit to action aligned with your principles")
+    if system_prompt:
+        parts.append(f"System: {system_prompt}")
     
-    if analysis.f_score < 0.4:
-        recommendations.append("Strengthen social connections and community engagement")
+    if examples:
+        parts.append("\nExamples:")
+        for example in examples:
+            parts.append(f"Input: {example.get('input', '')}")
+            parts.append(f"Output: {example.get('output', '')}")
     
-    # Overall coherence recommendations
-    if analysis.overall_coherence < 0.3:
-        recommendations.append("Consider speaking with a counselor or coach for additional support")
+    parts.append(f"\nInput: {prompt}")
+    parts.append("Output:")
     
-    # Red flag recommendations
-    if analysis.red_flags:
-        if any("CRISIS" in flag for flag in analysis.red_flags):
-            recommendations.append("URGENT: Please reach out to a mental health professional or crisis helpline immediately")
-        elif "absolutist thinking" in str(analysis.red_flags).lower():
-            recommendations.append("Practice seeing situations in shades of gray rather than black and white")
-        elif "circular reasoning" in str(analysis.red_flags).lower():
-            recommendations.append("Try to ground your thoughts in concrete evidence and examples")
-    
-    # Positive reinforcements
-    if analysis.positive_indicators:
-        if "reflective thinking" in analysis.positive_indicators:
-            recommendations.append("Continue your excellent practice of reflective thinking")
-        if "growth mindset" in analysis.positive_indicators:
-            recommendations.append("Your growth mindset is a strong foundation for continued development")
-    
-    # Default recommendations if none specific
-    if not recommendations:
-        recommendations.append("Continue monitoring your coherence and practicing mindful self-awareness")
-    
-    return recommendations
+    return "\n".join(parts)
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough estimate of token count"""
+    # Approximate: 1 token ≈ 4 characters
+    return len(text) // 4
+
+
+async def update_user_coherence(db: Database, user_id: str, coherence_score: float):
+    """Background task to update user's coherence score"""
+    try:
+        await db.update_user_coherence(user_id, coherence_score)
+    except Exception as e:
+        print(f"Failed to update user coherence: {e}")
+
+
+async def authenticate_websocket(token: str) -> Optional[User]:
+    """Authenticate WebSocket connection"""
+    # This would validate the JWT token
+    # For now, return None to indicate not implemented
+    return None
