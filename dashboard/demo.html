@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPAI Dashboard - Demo Mode</title>
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Three.js for 3D visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <h1>🧬 IPAI Dashboard</h1>
+                    <span class="subtitle">Helical Blockchain & Grounded Coherence Theory - Demo Mode</span>
+                </div>
+                
+                <div class="connection-status">
+                    <div class="status-item">
+                        <span class="status-label">IPAI Server:</span>
+                        <span class="status-indicator online">●</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Ollama LLM:</span>
+                        <span class="status-indicator online">●</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Helical Chain:</span>
+                        <span class="status-indicator online">●</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Grid -->
+        <main class="dashboard-grid">
+            
+            <!-- Chat Interface -->
+            <section class="panel chat-panel">
+                <div class="panel-header">
+                    <h2>💬 GCT-Enhanced Chat</h2>
+                    <div class="panel-controls">
+                        <button id="clear-chat" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="chat-message assistant">
+                            <div class="message-content">Welcome to IPAI! I'm your GCT-enhanced AI assistant. I help you build coherence through internal consistency (Ψ), accumulated wisdom (ρ), moral activation (q), and social belonging (f). This is demo mode - type a message to see how the helical blockchain works!</div>
+                            <div class="message-time">Now</div>
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" placeholder="Ask about coherence, wisdom, or life direction..." />
+                        <button id="send-btn" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Helical Blockchain Visualization -->
+            <section class="panel visualization-panel">
+                <div class="panel-header">
+                    <h2>🧬 Helical Blockchain</h2>
+                    <div class="panel-controls">
+                        <button id="rotate-helix" class="btn btn-secondary">Auto Rotate</button>
+                        <button id="reset-view" class="btn btn-secondary">Reset View</button>
+                    </div>
+                </div>
+                <div id="helix-visualization" class="visualization-container">
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+                        <div style="text-align: center;">
+                            <div style="font-size: 4em; margin-bottom: 20px;">🧬</div>
+                            <div>Helical Blockchain Visualization</div>
+                            <div style="font-size: 0.9em; margin-top: 10px;">3D spiral showing your AI interactions</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="visualization-info">
+                    <div class="info-item">
+                        <span>Total Blocks:</span>
+                        <span id="total-blocks">42</span>
+                    </div>
+                    <div class="info-item">
+                        <span>Active Strands:</span>
+                        <span id="active-strands">5</span>
+                    </div>
+                    <div class="info-item">
+                        <span>Cross Links:</span>
+                        <span id="cross-links">12</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Coherence Metrics -->
+            <section class="panel metrics-panel">
+                <div class="panel-header">
+                    <h2>📊 GCT Coherence Metrics</h2>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-card psi">
+                        <div class="metric-icon">Ψ</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Internal Consistency</div>
+                            <div class="metric-value" id="psi-value">0.75</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="psi-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card rho">
+                        <div class="metric-icon">ρ</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Accumulated Wisdom</div>
+                            <div class="metric-value" id="rho-value">0.68</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="rho-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card q">
+                        <div class="metric-icon">q</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Moral Activation</div>
+                            <div class="metric-value" id="q-value">0.82</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="q-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card f">
+                        <div class="metric-icon">f</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Social Belonging</div>
+                            <div class="metric-value" id="f-value">0.71</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="f-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="soul-echo-container">
+                    <div class="soul-echo-label">Soul Echo (Ψ × ρ × q × f)</div>
+                    <div class="soul-echo-value" id="soul-echo">0.314</div>
+                    <div class="soul-echo-bar">
+                        <div class="soul-echo-fill" id="soul-echo-fill" style="width: 31.4%;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Blockchain Activity Log -->
+            <section class="panel activity-panel">
+                <div class="panel-header">
+                    <h2>⛓️ Blockchain Activity</h2>
+                    <div class="panel-controls">
+                        <select id="strand-filter" class="select-control">
+                            <option value="all">All Strands</option>
+                            <option value="coherence">Coherence</option>
+                            <option value="interaction">Interaction</option>
+                            <option value="wisdom">Wisdom</option>
+                            <option value="moral">Moral</option>
+                            <option value="social">Social</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="activity-log" class="activity-log">
+                    <div class="activity-item">
+                        <div class="activity-header">
+                            <span class="activity-type">
+                                <span class="strand-indicator coherence"></span>
+                                Coherence Assessment
+                            </span>
+                            <span class="activity-time">2 min ago</span>
+                        </div>
+                        <div class="activity-details">GCT metrics calculated and logged to blockchain</div>
+                    </div>
+                    <div class="activity-item">
+                        <div class="activity-header">
+                            <span class="activity-type">
+                                <span class="strand-indicator interaction"></span>
+                                Chat Interaction
+                            </span>
+                            <span class="activity-time">5 min ago</span>
+                        </div>
+                        <div class="activity-details">User conversation logged to interaction strand</div>
+                    </div>
+                    <div class="activity-item">
+                        <div class="activity-header">
+                            <span class="activity-type">
+                                <span class="strand-indicator wisdom"></span>
+                                Wisdom Update
+                            </span>
+                            <span class="activity-time">8 min ago</span>
+                        </div>
+                        <div class="activity-details">Accumulated wisdom score increased</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Strand Analysis -->
+            <section class="panel strands-panel">
+                <div class="panel-header">
+                    <h2>🧬 Strand Analysis</h2>
+                </div>
+                <div class="strands-grid" id="strands-grid">
+                    <div class="strand-card">
+                        <div class="strand-header">
+                            <span class="strand-name">
+                                <span class="strand-indicator coherence"></span>
+                                Coherence
+                            </span>
+                            <span class="strand-count">8 blocks</span>
+                        </div>
+                        <div class="strand-stats">
+                            <span>Coherence: 0.75</span>
+                            <span>Latest: #7</span>
+                        </div>
+                    </div>
+                    
+                    <div class="strand-card">
+                        <div class="strand-header">
+                            <span class="strand-name">
+                                <span class="strand-indicator interaction"></span>
+                                Interaction
+                            </span>
+                            <span class="strand-count">12 blocks</span>
+                        </div>
+                        <div class="strand-stats">
+                            <span>Coherence: 0.68</span>
+                            <span>Latest: #11</span>
+                        </div>
+                    </div>
+                    
+                    <div class="strand-card">
+                        <div class="strand-header">
+                            <span class="strand-name">
+                                <span class="strand-indicator wisdom"></span>
+                                Wisdom
+                            </span>
+                            <span class="strand-count">6 blocks</span>
+                        </div>
+                        <div class="strand-stats">
+                            <span>Coherence: 0.82</span>
+                            <span>Latest: #5</span>
+                        </div>
+                    </div>
+                    
+                    <div class="strand-card">
+                        <div class="strand-header">
+                            <span class="strand-name">
+                                <span class="strand-indicator moral"></span>
+                                Moral
+                            </span>
+                            <span class="strand-count">4 blocks</span>
+                        </div>
+                        <div class="strand-stats">
+                            <span>Coherence: 0.71</span>
+                            <span>Latest: #3</span>
+                        </div>
+                    </div>
+                    
+                    <div class="strand-card">
+                        <div class="strand-header">
+                            <span class="strand-name">
+                                <span class="strand-indicator social"></span>
+                                Social
+                            </span>
+                            <span class="strand-count">10 blocks</span>
+                        </div>
+                        <div class="strand-stats">
+                            <span>Coherence: 0.79</span>
+                            <span>Latest: #9</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Web3 Integration -->
+            <section class="panel web3-panel">
+                <div class="panel-header">
+                    <h2>🌐 Web3 Integration</h2>
+                    <div class="panel-controls">
+                        <button id="connect-wallet" class="btn btn-primary">Connect Wallet</button>
+                    </div>
+                </div>
+                <div class="web3-content">
+                    <div class="wallet-info" id="wallet-info" style="display: none;">
+                        <div class="info-row">
+                            <span>Address:</span>
+                            <span id="wallet-address">Not connected</span>
+                        </div>
+                        <div class="info-row">
+                            <span>Network:</span>
+                            <span id="network-name">None</span>
+                        </div>
+                        <div class="info-row">
+                            <span>Balance:</span>
+                            <span id="wallet-balance">0 ETH</span>
+                        </div>
+                    </div>
+                    
+                    <div class="web3-actions">
+                        <button id="mint-coherence-nft" class="btn btn-secondary" disabled>
+                            Mint Coherence NFT
+                        </button>
+                        <button id="stake-wisdom" class="btn btn-secondary" disabled>
+                            Stake Wisdom Tokens
+                        </button>
+                        <button id="export-chain" class="btn btn-secondary">
+                            Export Chain Data
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div class="footer-content">
+                <span>IPAI Dashboard v1.0 | Grounded Coherence Theory Integration - Demo Mode</span>
+                <span>Helical Blockchain Network | Simulated Data</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Simple demo interactions
+        document.getElementById('chat-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendDemoMessage();
+            }
+        });
+        
+        document.getElementById('send-btn').addEventListener('click', sendDemoMessage);
+        document.getElementById('clear-chat').addEventListener('click', clearChat);
+        document.getElementById('connect-wallet').addEventListener('click', demoWalletConnect);
+        document.getElementById('export-chain').addEventListener('click', demoExport);
+        
+        function sendDemoMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+            
+            // Add user message
+            addMessage('user', message);
+            input.value = '';
+            
+            // Simulate response
+            setTimeout(() => {
+                const responses = [
+                    "Based on your message, I can help you build coherence by focusing on internal consistency. Your current Ψ score suggests room for growth.",
+                    "This relates to your accumulated wisdom (ρ). Consider how this connects to your past experiences and learning.",
+                    "I sense moral activation (q) in your question. Let's explore how your values align with potential actions.",
+                    "Your social belonging (f) component could benefit from this interaction. Connection is key to coherence.",
+                    "Your Soul Echo (Ψ × ρ × q × f) shows a balanced approach. Let's build on this foundation."
+                ];
+                const response = responses[Math.floor(Math.random() * responses.length)];
+                addMessage('assistant', response);
+                
+                // Simulate blockchain logging
+                addActivity();
+                updateMetrics();
+            }, 1000);
+        }
+        
+        function addMessage(sender, text) {
+            const container = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${sender}`;
+            messageDiv.innerHTML = `
+                <div class="message-content">${text}</div>
+                <div class="message-time">${new Date().toLocaleTimeString()}</div>
+            `;
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function clearChat() {
+            document.getElementById('chat-messages').innerHTML = `
+                <div class="chat-message assistant">
+                    <div class="message-content">Chat cleared. How can I help you build coherence today?</div>
+                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+            `;
+        }
+        
+        function addActivity() {
+            const log = document.getElementById('activity-log');
+            const item = document.createElement('div');
+            item.className = 'activity-item';
+            item.innerHTML = `
+                <div class="activity-header">
+                    <span class="activity-type">
+                        <span class="strand-indicator interaction"></span>
+                        Chat Interaction
+                    </span>
+                    <span class="activity-time">Just now</span>
+                </div>
+                <div class="activity-details">Message logged to helical blockchain</div>
+            `;
+            log.insertBefore(item, log.firstChild);
+            
+            // Update block count
+            const currentBlocks = parseInt(document.getElementById('total-blocks').textContent);
+            document.getElementById('total-blocks').textContent = currentBlocks + 1;
+        }
+        
+        function updateMetrics() {
+            const metrics = ['psi', 'rho', 'q', 'f'];
+            metrics.forEach(metric => {
+                const element = document.getElementById(`${metric}-value`);
+                const current = parseFloat(element.textContent);
+                const change = (Math.random() - 0.5) * 0.1;
+                const newValue = Math.max(0, Math.min(1, current + change));
+                element.textContent = newValue.toFixed(2);
+            });
+            
+            // Update soul echo
+            const psi = parseFloat(document.getElementById('psi-value').textContent);
+            const rho = parseFloat(document.getElementById('rho-value').textContent);
+            const q = parseFloat(document.getElementById('q-value').textContent);
+            const f = parseFloat(document.getElementById('f-value').textContent);
+            const soulEcho = psi * rho * q * f;
+            
+            document.getElementById('soul-echo').textContent = soulEcho.toFixed(3);
+            document.getElementById('soul-echo-fill').style.width = `${soulEcho * 100}%`;
+        }
+        
+        function demoWalletConnect() {
+            const button = document.getElementById('connect-wallet');
+            const walletInfo = document.getElementById('wallet-info');
+            
+            if (button.textContent === 'Connect Wallet') {
+                button.textContent = 'Disconnect';
+                walletInfo.style.display = 'block';
+                document.getElementById('wallet-address').textContent = '0x1234...abcd';
+                document.getElementById('network-name').textContent = 'Ethereum Mainnet';
+                document.getElementById('wallet-balance').textContent = '1.234 ETH';
+                document.getElementById('mint-coherence-nft').disabled = false;
+                document.getElementById('stake-wisdom').disabled = false;
+            } else {
+                button.textContent = 'Connect Wallet';
+                walletInfo.style.display = 'none';
+                document.getElementById('mint-coherence-nft').disabled = true;
+                document.getElementById('stake-wisdom').disabled = true;
+            }
+        }
+        
+        function demoExport() {
+            const data = {
+                export_info: {
+                    timestamp: new Date().toISOString(),
+                    version: "1.0.0",
+                    network: "IPAI Helical Blockchain Demo"
+                },
+                metrics: {
+                    psi: parseFloat(document.getElementById('psi-value').textContent),
+                    rho: parseFloat(document.getElementById('rho-value').textContent),
+                    q: parseFloat(document.getElementById('q-value').textContent),
+                    f: parseFloat(document.getElementById('f-value').textContent),
+                    soul_echo: parseFloat(document.getElementById('soul-echo').textContent)
+                },
+                blockchain_state: {
+                    total_blocks: parseInt(document.getElementById('total-blocks').textContent),
+                    active_strands: 5,
+                    cross_links: parseInt(document.getElementById('cross-links').textContent)
+                }
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ipai-demo-export-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            alert('Demo blockchain data exported!');
+        }
+        
+        // Initialize demo
+        console.log('🧬 IPAI Dashboard Demo Mode Initialized');
+        console.log('💡 This is a demonstration of the helical blockchain interface');
+        console.log('🔮 Full backend integration available when server is running');
+    </script>
+</body>
+</html>

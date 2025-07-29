@@ -1,0 +1,136 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.py'
+      - '**.ts'
+      - '**.tsx'
+      - '**.js'
+      - '**.jsx'
+      - '**.sol'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get changed files
+        id: changed-files
+        run: |
+          echo "files=$(git diff --name-only HEAD~1 HEAD | grep -E '\.(py|ts|tsx|js|jsx|sol)$' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+      
+      - name: Run Claude Code Review
+        id: code-review
+        uses: anthropics/claude-code-base-action@beta
+        with:
+          prompt: |
+            Please review the changes in this pull request. Focus on:
+            
+            1. **Security vulnerabilities** - Look for potential security issues like:
+               - Exposed secrets or API keys
+               - SQL injection vulnerabilities
+               - Weak cryptography
+               - Missing input validation
+               
+            2. **Code quality** - Evaluate:
+               - Code organization and maintainability
+               - Adherence to best practices
+               - Proper error handling
+               - Performance implications
+               
+            3. **Architecture concerns** - Consider:
+               - Design patterns usage
+               - Separation of concerns
+               - Scalability issues
+               
+            4. **Specific to IPAI project**:
+               - Grounded Coherence Theory calculations accuracy
+               - Token security in blockchain integration
+               - LLM integration best practices
+               
+            Please provide:
+            - A summary of the changes
+            - Critical issues that must be fixed (if any)
+            - Suggestions for improvements
+            - Code examples for recommended changes
+            
+            Format your review as a markdown comment suitable for a GitHub PR.
+            
+            Changed files: ${{ steps.changed-files.outputs.files }}
+          allowed_tools: "Bash(git:*),View,GlobTool,GrepTool,BatchTool"
+          model: "claude-3-5-sonnet-20241022"
+          timeout_minutes: "15"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      
+      - name: Comment PR with Review
+        if: steps.code-review.outputs.conclusion == 'success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const executionFile = '${{ steps.code-review.outputs.execution_file }}';
+            
+            try {
+              const executionLog = JSON.parse(fs.readFileSync(executionFile, 'utf8'));
+              
+              // Extract the review from Claude's response
+              let review = '';
+              for (let i = executionLog.length - 1; i >= 0; i--) {
+                if (executionLog[i].role === 'assistant' && executionLog[i].content) {
+                  review = executionLog[i].content;
+                  break;
+                }
+              }
+              
+              if (review) {
+                // Create a comment on the PR
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: `## 🤖 Claude Code Review\n\n${review}\n\n---\n*This review was generated automatically by [Claude Code](https://www.anthropic.com/claude)*`
+                });
+                
+                // Add labels based on review content
+                const labels = [];
+                if (review.toLowerCase().includes('security')) {
+                  labels.push('security');
+                }
+                if (review.toLowerCase().includes('performance')) {
+                  labels.push('performance');
+                }
+                if (review.toLowerCase().includes('needs work') || review.toLowerCase().includes('must fix')) {
+                  labels.push('needs-work');
+                }
+                
+                if (labels.length > 0) {
+                  await github.rest.issues.addLabels({
+                    issue_number: context.issue.number,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    labels: labels
+                  });
+                }
+              }
+            } catch (error) {
+              console.error('Error processing review:', error);
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## ⚠️ Claude Code Review Error\n\nAn error occurred while processing the code review. Please check the workflow logs for details.`
+              });
+            }

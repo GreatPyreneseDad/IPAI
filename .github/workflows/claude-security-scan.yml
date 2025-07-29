@@ -1,0 +1,170 @@
+name: Claude Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run security scan weekly on Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Run Claude Security Analysis
+        id: security-scan
+        uses: anthropics/claude-code-base-action@beta
+        with:
+          prompt: |
+            Perform a comprehensive security audit of the IPAI codebase. Focus on:
+            
+            ## Critical Security Areas:
+            
+            1. **Authentication & Authorization**
+               - JWT token implementation in src/core/security.py
+               - Token revocation mechanisms
+               - Session management
+               - Access control implementations
+            
+            2. **Cryptography & Secrets**
+               - Encryption key generation and storage
+               - Password hashing mechanisms
+               - Secret management practices
+               - Blockchain private key handling
+            
+            3. **Input Validation & Injection**
+               - SQL injection vulnerabilities
+               - Command injection risks
+               - XSS vulnerabilities
+               - Path traversal issues
+            
+            4. **API Security**
+               - Rate limiting implementation
+               - CORS configuration
+               - API endpoint authorization
+               - Request/response validation
+            
+            5. **Blockchain Security**
+               - Smart contract vulnerabilities
+               - Transaction signing security
+               - Private key management
+               - Reentrancy attacks
+            
+            6. **Data Protection**
+               - PII handling
+               - Data encryption at rest and in transit
+               - Logging sensitive information
+               - Data retention policies
+            
+            7. **Dependencies**
+               - Known vulnerabilities in dependencies
+               - Outdated packages
+               - Supply chain risks
+            
+            ## Output Format:
+            
+            Provide a structured security report with:
+            
+            ### Executive Summary
+            - Overall security posture rating (Critical/High/Medium/Low)
+            - Number of issues by severity
+            
+            ### Critical Findings
+            List any critical security issues that need immediate attention
+            
+            ### High Priority Issues
+            Security issues that should be addressed soon
+            
+            ### Medium Priority Issues
+            Security improvements to consider
+            
+            ### Recommendations
+            - Immediate actions required
+            - Short-term improvements
+            - Long-term security enhancements
+            
+            ### Code Examples
+            For each finding, provide:
+            - File path and line numbers
+            - Vulnerable code snippet
+            - Recommended fix with code example
+            
+            Use SARIF-compatible format where possible for integration with GitHub Security tab.
+          allowed_tools: "View,GlobTool,GrepTool,BatchTool"
+          disallowed_tools: "Bash,Edit,Write"
+          model: "claude-3-5-sonnet-20241022"
+          timeout_minutes: "20"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      
+      - name: Process Security Report
+        if: steps.security-scan.outputs.conclusion == 'success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const executionFile = '${{ steps.security-scan.outputs.execution_file }}';
+            
+            try {
+              const executionLog = JSON.parse(fs.readFileSync(executionFile, 'utf8'));
+              
+              // Extract the security report
+              let report = '';
+              for (let i = executionLog.length - 1; i >= 0; i--) {
+                if (executionLog[i].role === 'assistant' && executionLog[i].content) {
+                  report = executionLog[i].content;
+                  break;
+                }
+              }
+              
+              if (report) {
+                // Save the full report
+                fs.writeFileSync('security-report.md', `# IPAI Security Scan Report\n\nGenerated: ${new Date().toISOString()}\n\n${report}`);
+                
+                // Create an issue if critical findings exist
+                if (report.toLowerCase().includes('critical')) {
+                  const issue = await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: `🚨 Critical Security Findings - ${new Date().toLocaleDateString()}`,
+                    body: `## Critical Security Issues Found\n\n${report}\n\n---\n*This report was generated automatically by Claude Security Scan*`,
+                    labels: ['security', 'critical', 'automated']
+                  });
+                  
+                  console.log(`Created security issue: ${issue.data.html_url}`);
+                }
+                
+                // Upload report as artifact
+                const artifactClient = require('@actions/artifact').create();
+                await artifactClient.uploadArtifact(
+                  'security-report',
+                  ['security-report.md'],
+                  process.cwd()
+                );
+              }
+            } catch (error) {
+              console.error('Error processing security report:', error);
+              core.setFailed('Failed to process security report');
+            }
+      
+      - name: Upload Security Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-report
+          path: security-report.md
+          retention-days: 90

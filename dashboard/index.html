@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPAI Dashboard - Helical Blockchain</title>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Three.js for 3D visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.min.js"></script>
+    
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    
+    <!-- Web3.js for blockchain interaction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.7.3/web3.min.js"></script>
+    
+    <!-- Socket.io for real-time updates -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <h1>🧬 IPAI Dashboard</h1>
+                    <span class="subtitle">Helical Blockchain & Grounded Coherence Theory</span>
+                </div>
+                
+                <div class="connection-status">
+                    <div class="status-item">
+                        <span class="status-label">IPAI Server:</span>
+                        <span id="server-status" class="status-indicator">●</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Ollama LLM:</span>
+                        <span id="llm-status" class="status-indicator">●</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Helical Chain:</span>
+                        <span id="blockchain-status" class="status-indicator">●</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Grid -->
+        <main class="dashboard-grid">
+            
+            <!-- Chat Interface -->
+            <section class="panel chat-panel">
+                <div class="panel-header">
+                    <h2>💬 GCT-Enhanced Chat</h2>
+                    <div class="panel-controls">
+                        <button id="clear-chat" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+                <div class="chat-container">
+                    <div id="chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chat-input" placeholder="Ask about coherence, wisdom, or life direction..." />
+                        <button id="send-btn" class="btn btn-primary">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Helical Blockchain Visualization -->
+            <section class="panel visualization-panel">
+                <div class="panel-header">
+                    <h2>🧬 Helical Blockchain</h2>
+                    <div class="panel-controls">
+                        <button id="rotate-helix" class="btn btn-secondary">Auto Rotate</button>
+                        <button id="reset-view" class="btn btn-secondary">Reset View</button>
+                    </div>
+                </div>
+                <div id="helix-visualization" class="visualization-container"></div>
+                <div class="visualization-info">
+                    <div class="info-item">
+                        <span>Total Blocks:</span>
+                        <span id="total-blocks">0</span>
+                    </div>
+                    <div class="info-item">
+                        <span>Active Strands:</span>
+                        <span id="active-strands">5</span>
+                    </div>
+                    <div class="info-item">
+                        <span>Cross Links:</span>
+                        <span id="cross-links">0</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Coherence Metrics -->
+            <section class="panel metrics-panel">
+                <div class="panel-header">
+                    <h2>📊 GCT Coherence Metrics</h2>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-card psi">
+                        <div class="metric-icon">Ψ</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Internal Consistency</div>
+                            <div class="metric-value" id="psi-value">0.75</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="psi-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card rho">
+                        <div class="metric-icon">ρ</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Accumulated Wisdom</div>
+                            <div class="metric-value" id="rho-value">0.68</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="rho-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card q">
+                        <div class="metric-icon">q</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Moral Activation</div>
+                            <div class="metric-value" id="q-value">0.82</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="q-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card f">
+                        <div class="metric-icon">f</div>
+                        <div class="metric-info">
+                            <div class="metric-label">Social Belonging</div>
+                            <div class="metric-value" id="f-value">0.71</div>
+                        </div>
+                        <div class="metric-chart">
+                            <canvas id="f-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="soul-echo-container">
+                    <div class="soul-echo-label">Soul Echo (Ψ × ρ × q × f)</div>
+                    <div class="soul-echo-value" id="soul-echo">0.307</div>
+                    <div class="soul-echo-bar">
+                        <div class="soul-echo-fill" id="soul-echo-fill"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Blockchain Activity Log -->
+            <section class="panel activity-panel">
+                <div class="panel-header">
+                    <h2>⛓️ Blockchain Activity</h2>
+                    <div class="panel-controls">
+                        <select id="strand-filter" class="select-control">
+                            <option value="all">All Strands</option>
+                            <option value="coherence">Coherence</option>
+                            <option value="interaction">Interaction</option>
+                            <option value="wisdom">Wisdom</option>
+                            <option value="moral">Moral</option>
+                            <option value="social">Social</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="activity-log" class="activity-log"></div>
+            </section>
+
+            <!-- Strand Analysis -->
+            <section class="panel strands-panel">
+                <div class="panel-header">
+                    <h2>🧬 Strand Analysis</h2>
+                </div>
+                <div class="strands-grid" id="strands-grid">
+                    <!-- Strand cards will be populated dynamically -->
+                </div>
+            </section>
+
+            <!-- Web3 Integration -->
+            <section class="panel web3-panel">
+                <div class="panel-header">
+                    <h2>🌐 Web3 Integration</h2>
+                    <div class="panel-controls">
+                        <button id="connect-wallet" class="btn btn-primary">Connect Wallet</button>
+                    </div>
+                </div>
+                <div class="web3-content">
+                    <div class="wallet-info" id="wallet-info" style="display: none;">
+                        <div class="info-row">
+                            <span>Address:</span>
+                            <span id="wallet-address">Not connected</span>
+                        </div>
+                        <div class="info-row">
+                            <span>Network:</span>
+                            <span id="network-name">None</span>
+                        </div>
+                        <div class="info-row">
+                            <span>Balance:</span>
+                            <span id="wallet-balance">0 ETH</span>
+                        </div>
+                    </div>
+                    
+                    <div class="web3-actions">
+                        <button id="mint-coherence-nft" class="btn btn-secondary" disabled>
+                            Mint Coherence NFT
+                        </button>
+                        <button id="stake-wisdom" class="btn btn-secondary" disabled>
+                            Stake Wisdom Tokens
+                        </button>
+                        <button id="export-chain" class="btn btn-secondary">
+                            Export Chain Data
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <div class="footer-content">
+                <span>IPAI Dashboard v1.0 | Grounded Coherence Theory Integration</span>
+                <span>Helical Blockchain Network | Real-time Updates</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <div id="block-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="close-modal">&times;</span>
+            <h2>Block Details</h2>
+            <div id="block-details"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="dashboard.js"></script>
+    <script src="helix-visualization.js"></script>
+    <script src="web3-integration.js"></script>
+</body>
+</html>
