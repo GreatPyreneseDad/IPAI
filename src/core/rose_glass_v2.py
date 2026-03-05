@@ -369,6 +369,16 @@ def veritas_check(
     High psi with zero rho suggests theoretical without experiential grounding.
     Perfectly balanced dimensions are statistically implausible in genuine expression.
     High psi with low q/f and minimal texture suggests suppression (calibration-dependent).
+
+    Note: single-utterance suppression detection is unreliable without
+    conversational context. Phase 3 will add gradient tracking across turns.
+
+    Suppression detection catches flat-affect minimal statements (quiet,
+    low-engagement signals). It does not catch performed stability — active
+    narration of coping ('I keep telling everyone I'm handling it') — because
+    that pattern requires gradient tracking across conversational turns.
+    Single-utterance performed stability is intentionally not flagged here.
+    Phase 3 implements turn-by-turn gradient tracking.
     """
     if cal is None:
         cal = DimensionalCalibration()
