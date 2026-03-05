@@ -2,6 +2,11 @@
 Core math validation tests for Rose Glass v2.
 """
 
+import json
+from unittest.mock import patch, MagicMock
+
+import requests
+
 from src.core.rose_glass_v2 import (
     biological_optimization,
     calculate_coherence,
@@ -11,6 +16,8 @@ from src.core.rose_glass_v2 import (
     lambda_decomposition,
     veritas_check,
     DimensionalCalibration,
+    RoseGlassEngine,
+    RoseGlassScore,
 )
 
 
@@ -231,3 +238,102 @@ class TestVeritasCheck:
         """Genuine expression should have dimensional texture > 0."""
         result = veritas_check(0.3, 0.7, 0.5, 0.2)
         assert result["dimensional_texture"] > 0.0
+
+
+class TestAnalyzeTextLLM:
+    """Tests for LLM-powered analyze_text with mocked Ollama."""
+
+    def _mock_ollama_response(self, dims: dict) -> MagicMock:
+        """Build a mock response from Ollama."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"response": json.dumps(dims)}
+        mock_resp.raise_for_status = MagicMock()
+        return mock_resp
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_llm_analysis_used_when_available(self, mock_post):
+        """When Ollama responds, its values should drive the score."""
+        ollama_dims = {
+            "psi": 0.8, "rho": 0.6, "q": 0.5,
+            "f": 0.4, "tau": 0.3, "lambda": 0.2,
+        }
+        mock_post.return_value = self._mock_ollama_response(ollama_dims)
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("Some deep philosophical text.")
+
+        assert isinstance(result, RoseGlassScore)
+        assert result.psi == 0.8
+        assert result.rho == 0.6
+        assert result.q_raw == 0.5
+        assert result.f == 0.4
+        assert result.tau == 0.3
+        assert result.lambda_ == 0.2
+        mock_post.assert_called_once()
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_fallback_to_heuristic_on_connection_error(self, mock_post):
+        """When Ollama is unreachable, heuristic should be used."""
+        mock_post.side_effect = requests.ConnectionError("refused")
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("We feel the weight of our ancestors.")
+
+        assert isinstance(result, RoseGlassScore)
+        # Heuristic should detect emotional and social words
+        assert result.q_raw > 0.1
+        assert result.f > 0.05
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_fallback_on_invalid_json(self, mock_post):
+        """When Ollama returns non-JSON, heuristic should be used."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"response": "not valid json at all"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("A simple test sentence.")
+        assert isinstance(result, RoseGlassScore)
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_llm_values_clamped_to_0_1(self, mock_post):
+        """LLM values outside 0-1 should be clamped."""
+        ollama_dims = {
+            "psi": 1.5, "rho": -0.3, "q": 0.5,
+            "f": 0.4, "tau": 2.0, "lambda": 0.1,
+        }
+        mock_post.return_value = self._mock_ollama_response(ollama_dims)
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("Test clamping.")
+
+        assert result.psi == 1.0
+        assert result.rho == 0.0
+        assert result.tau == 1.0
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_llm_markdown_fenced_json(self, mock_post):
+        """LLM response wrapped in markdown code fences should parse."""
+        raw = '```json\n{"psi":0.7,"rho":0.5,"q":0.4,"f":0.3,"tau":0.2,"lambda":0.1}\n```'
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"response": raw}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("Test fenced response.")
+        assert result.psi == 0.7
+        assert result.tau == 0.2
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_fallback_on_timeout(self, mock_post):
+        """Timeout should trigger heuristic fallback."""
+        mock_post.side_effect = requests.Timeout("timed out")
+
+        engine = RoseGlassEngine()
+        result = engine.analyze_text("Testing timeout fallback.")
+        assert isinstance(result, RoseGlassScore)

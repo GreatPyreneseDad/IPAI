@@ -22,10 +22,13 @@ ROSE Corp. | MacGregor Holding Company
 "Coherence is constructed, not discovered." — Ibn Rushd, adapted
 """
 
+import json
 import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
+
+import requests
 
 
 # =============================================================================
@@ -534,22 +537,54 @@ class RoseGlassEngine:
             veritas=ver,
         )
 
-    def analyze_text(
-        self,
-        text: str,
-        calibration: str = "western_academic",
-    ) -> RoseGlassScore:
+    # Ollama configuration
+    OLLAMA_URL = "http://localhost:11434"
+    OLLAMA_MODEL = "llama3.2:latest"
+
+    def _llm_estimate_dimensions(self, text: str) -> Optional[Dict[str, float]]:
         """
-        Simplified heuristic estimation from text.
-
-        This is NOT a replacement for LLM-powered analysis.
-        It provides rough dimensional estimates based on
-        text characteristics for demonstration purposes.
-
-        Phase 2 will integrate actual LLM analysis.
+        Call Ollama to estimate Rose Glass dimensions from text.
+        Returns dict with keys psi, rho, q, f, tau, lambda_ or None on failure.
         """
-        cal = self.get_calibration(calibration)
+        prompt = (
+            "Analyze the following text and estimate these psychological/philosophical "
+            "dimensions as float values between 0.0 and 1.0. Return ONLY valid JSON "
+            "with exactly these keys, no explanation:\n"
+            "- psi: internal consistency (how logically coherent and self-consistent the text is)\n"
+            "- rho: accumulated wisdom (depth of experiential knowledge and insight)\n"
+            "- q: emotional activation (intensity of moral/emotional energy)\n"
+            "- f: social belonging (strength of relational and communal language)\n"
+            "- tau: temporal depth (references to history, tradition, generational time)\n"
+            "- lambda: stress/decay signals (indicators of misperception, distortion, or erosion)\n\n"
+            f"Text:\n{text}\n\n"
+            "JSON:"
+        )
+        try:
+            resp = requests.post(
+                f"{self.OLLAMA_URL}/api/generate",
+                json={"model": self.OLLAMA_MODEL, "prompt": prompt, "stream": False},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            raw = resp.json().get("response", "")
+            # Extract JSON from response (handle markdown fences)
+            raw = raw.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            data = json.loads(raw)
+            dims = {}
+            for key, out_key in [
+                ("psi", "psi"), ("rho", "rho"), ("q", "q"),
+                ("f", "f"), ("tau", "tau"), ("lambda", "lambda_"),
+            ]:
+                val = float(data[key])
+                dims[out_key] = max(0.0, min(val, 1.0))
+            return dims
+        except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError):
+            return None
 
+    def _heuristic_estimate_dimensions(self, text: str) -> Dict[str, float]:
+        """Keyword-based heuristic fallback for dimension estimation."""
         words = text.split()
         word_count = len(words)
         unique_words = len(set(w.lower() for w in words))
@@ -575,7 +610,7 @@ class RoseGlassEngine:
             'anger', 'grief', 'loss', 'carry', 'weight', 'heart',
             'soul', 'believe', 'fight', 'struggle', 'survive',
         })
-        q_raw = min(
+        q = min(
             (exclamations * 0.1 + questions * 0.05 + caps_ratio * 0.5 +
              emotional_words * 0.08 + 0.1),
             0.95
@@ -587,7 +622,7 @@ class RoseGlassEngine:
             'together', 'people', 'children', 'brother', 'sister',
             'mother', 'father', 'friend', 'neighbor', 'tribe',
         })
-        f_raw = min(social_words * 0.1 + 0.05, 0.95)
+        f = min(social_words * 0.1 + 0.05, 0.95)
 
         # τ (temporal depth): temporal language
         temporal_words = sum(1 for w in words if w.lower() in {
@@ -600,8 +635,25 @@ class RoseGlassEngine:
         # λ (misperception decay): inverse of clarity
         lambda_ = max(0.3 - (psi * 0.2), 0.05)
 
+        return {"psi": psi, "rho": rho, "q": q, "f": f, "tau": tau, "lambda_": lambda_}
+
+    def analyze_text(
+        self,
+        text: str,
+        calibration: str = "western_academic",
+    ) -> RoseGlassScore:
+        """
+        Estimate Rose Glass dimensions from text using LLM analysis.
+
+        Calls Ollama (llama3.2) for dimensional estimation.
+        Falls back to keyword heuristic if Ollama is unreachable.
+        """
+        dims = self._llm_estimate_dimensions(text)
+        if dims is None:
+            dims = self._heuristic_estimate_dimensions(text)
+
         return self.analyze_dimensions(
-            psi=psi, rho=rho, q=q_raw, f=f_raw,
-            tau=tau, lambda_=lambda_,
+            psi=dims["psi"], rho=dims["rho"], q=dims["q"], f=dims["f"],
+            tau=dims["tau"], lambda_=dims["lambda_"],
             calibration=calibration,
         )
