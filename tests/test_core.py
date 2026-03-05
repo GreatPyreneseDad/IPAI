@@ -241,7 +241,7 @@ class TestVeritasCheck:
 
 
 class TestAnalyzeTextLLM:
-    """Tests for LLM-powered analyze_text with mocked Ollama."""
+    """Tests for hybrid LLM + heuristic analyze_text with mocked Ollama."""
 
     def _mock_ollama_response(self, dims: dict) -> MagicMock:
         """Build a mock response from Ollama."""
@@ -252,8 +252,8 @@ class TestAnalyzeTextLLM:
         return mock_resp
 
     @patch("src.core.rose_glass_v2.requests.post")
-    def test_llm_analysis_used_when_available(self, mock_post):
-        """When Ollama responds, its values should drive the score."""
+    def test_hybrid_strategy_blends_sources(self, mock_post):
+        """Hybrid strategy: LLM for q/f/tau, heuristic for rho/lambda_, avg for psi."""
         ollama_dims = {
             "psi": 0.8, "rho": 0.6, "q": 0.5,
             "f": 0.4, "tau": 0.3, "lambda": 0.2,
@@ -261,16 +261,21 @@ class TestAnalyzeTextLLM:
         mock_post.return_value = self._mock_ollama_response(ollama_dims)
 
         engine = RoseGlassEngine()
-        result = engine.analyze_text("Some deep philosophical text.")
+        text = "Some deep philosophical text."
+        h_dims = engine._heuristic_estimate_dimensions(text)
+        result = engine.analyze_text(text)
 
         assert isinstance(result, RoseGlassScore)
-        assert result.psi == 0.8
-        assert result.rho == 0.6
+        # LLM dims: q, f, tau should come from LLM
         assert result.q_raw == 0.5
         assert result.f == 0.4
         assert result.tau == 0.3
-        assert result.lambda_ == 0.2
-        mock_post.assert_called_once()
+        # Heuristic dims: rho, lambda_ should come from heuristic
+        assert result.rho == round(h_dims["rho"], 4)
+        assert result.lambda_ == round(h_dims["lambda_"], 4)
+        # Hybrid dim: psi should be average of LLM and heuristic
+        expected_psi = round((0.8 + h_dims["psi"]) / 2.0, 4)
+        assert result.psi == expected_psi
 
     @patch("src.core.rose_glass_v2.requests.post")
     def test_fallback_to_heuristic_on_connection_error(self, mock_post):
@@ -300,7 +305,7 @@ class TestAnalyzeTextLLM:
 
     @patch("src.core.rose_glass_v2.requests.post")
     def test_llm_values_clamped_to_0_1(self, mock_post):
-        """LLM values outside 0-1 should be clamped."""
+        """LLM values outside 0-1 should be clamped before blending."""
         ollama_dims = {
             "psi": 1.5, "rho": -0.3, "q": 0.5,
             "f": 0.4, "tau": 2.0, "lambda": 0.1,
@@ -308,11 +313,17 @@ class TestAnalyzeTextLLM:
         mock_post.return_value = self._mock_ollama_response(ollama_dims)
 
         engine = RoseGlassEngine()
-        result = engine.analyze_text("Test clamping.")
+        text = "Test clamping."
+        result = engine.analyze_text(text)
 
-        assert result.psi == 1.0
-        assert result.rho == 0.0
+        # tau comes from LLM, clamped to 1.0
         assert result.tau == 1.0
+        # q comes from LLM
+        assert result.q_raw == 0.5
+        # psi is hybrid: avg(clamped 1.0, heuristic)
+        h_dims = engine._heuristic_estimate_dimensions(text)
+        expected_psi = round((1.0 + h_dims["psi"]) / 2.0, 4)
+        assert result.psi == expected_psi
 
     @patch("src.core.rose_glass_v2.requests.post")
     def test_llm_markdown_fenced_json(self, mock_post):
@@ -325,9 +336,14 @@ class TestAnalyzeTextLLM:
         mock_post.return_value = mock_resp
 
         engine = RoseGlassEngine()
-        result = engine.analyze_text("Test fenced response.")
-        assert result.psi == 0.7
+        text = "Test fenced response."
+        result = engine.analyze_text(text)
+        # tau from LLM
         assert result.tau == 0.2
+        # psi is hybrid avg
+        h_dims = engine._heuristic_estimate_dimensions(text)
+        expected_psi = round((0.7 + h_dims["psi"]) / 2.0, 4)
+        assert result.psi == expected_psi
 
     @patch("src.core.rose_glass_v2.requests.post")
     def test_fallback_on_timeout(self, mock_post):
@@ -337,3 +353,19 @@ class TestAnalyzeTextLLM:
         engine = RoseGlassEngine()
         result = engine.analyze_text("Testing timeout fallback.")
         assert isinstance(result, RoseGlassScore)
+
+    @patch("src.core.rose_glass_v2.requests.post")
+    def test_llm_raw_dimensions_returns_pure_llm(self, mock_post):
+        """_llm_raw_dimensions should return unblended LLM values."""
+        ollama_dims = {
+            "psi": 0.8, "rho": 0.6, "q": 0.5,
+            "f": 0.4, "tau": 0.3, "lambda": 0.2,
+        }
+        mock_post.return_value = self._mock_ollama_response(ollama_dims)
+
+        engine = RoseGlassEngine()
+        raw = engine._llm_raw_dimensions("test")
+        assert raw["psi"] == 0.8
+        assert raw["rho"] == 0.6
+        assert raw["q"] == 0.5
+        assert raw["lambda_"] == 0.2

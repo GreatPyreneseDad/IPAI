@@ -541,10 +541,10 @@ class RoseGlassEngine:
     OLLAMA_URL = "http://localhost:11434"
     OLLAMA_MODEL = "llama3.2:latest"
 
-    def _llm_estimate_dimensions(self, text: str) -> Optional[Dict[str, float]]:
+    def _llm_raw_dimensions(self, text: str) -> Optional[Dict[str, float]]:
         """
         Call Ollama to estimate Rose Glass dimensions from text.
-        Returns dict with keys psi, rho, q, f, tau, lambda_ or None on failure.
+        Returns raw LLM dict with keys psi, rho, q, f, tau, lambda_ or None on failure.
         """
         prompt = (
             "Analyze the following text and estimate these psychological/philosophical "
@@ -582,6 +582,41 @@ class RoseGlassEngine:
             return dims
         except (requests.RequestException, KeyError, ValueError, json.JSONDecodeError):
             return None
+
+    # Hybrid strategy: which source to use per dimension
+    # LLM outperforms heuristic on these:
+    _LLM_DIMS = {"q", "f", "tau"}
+    # Heuristic more reliable on these:
+    _HEURISTIC_DIMS = {"rho", "lambda_"}
+    # Average both for these:
+    _HYBRID_DIMS = {"psi"}
+
+    def _llm_estimate_dimensions(self, text: str) -> Optional[Dict[str, float]]:
+        """
+        Hybrid LLM + heuristic dimension estimation.
+
+        Uses LLM values for q, f, tau (LLM outperforms heuristic).
+        Uses heuristic values for rho, lambda_ (heuristic more reliable).
+        Uses average of both for psi (both reasonable).
+
+        Returns blended dict or None if LLM is unavailable (full heuristic fallback).
+        """
+        llm_dims = self._llm_raw_dimensions(text)
+        if llm_dims is None:
+            return None
+
+        heuristic_dims = self._heuristic_estimate_dimensions(text)
+
+        blended = {}
+        for dim in ("psi", "rho", "q", "f", "tau", "lambda_"):
+            if dim in self._LLM_DIMS:
+                blended[dim] = llm_dims[dim]
+            elif dim in self._HEURISTIC_DIMS:
+                blended[dim] = heuristic_dims[dim]
+            else:  # hybrid — average
+                blended[dim] = (llm_dims[dim] + heuristic_dims[dim]) / 2.0
+
+        return blended
 
     def _heuristic_estimate_dimensions(self, text: str) -> Dict[str, float]:
         """Keyword-based heuristic fallback for dimension estimation."""
