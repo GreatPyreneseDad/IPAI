@@ -356,7 +356,8 @@ def lambda_decomposition(
 
 def veritas_check(
     psi: float, rho: float, q: float, f: float,
-    cal: Optional[DimensionalCalibration] = None
+    cal: Optional[DimensionalCalibration] = None,
+    calibration: str = "western_academic",
 ) -> Dict[str, Any]:
     """
     Authenticity detection via dimensional coherence patterns.
@@ -367,11 +368,13 @@ def veritas_check(
     High q with low psi suggests performed emotion (activation without consistency).
     High psi with zero rho suggests theoretical without experiential grounding.
     Perfectly balanced dimensions are statistically implausible in genuine expression.
+    High psi with low q/f and minimal texture suggests suppression (calibration-dependent).
     """
     if cal is None:
         cal = DimensionalCalibration()
 
     flags = []
+    note = None
     dims = [psi, rho, q, f]
 
     # Check for performed emotion: high activation without internal consistency
@@ -395,6 +398,27 @@ def veritas_check(
     variance = sum((d - mean_d) ** 2 for d in dims) / 4
     dimensional_texture = math.sqrt(variance)
 
+    # Suppression pattern: high consistency but flat, minimal activation/texture
+    # Only flagged in calibrations where suppression is clinically relevant
+    # Engagement texture excludes psi — measures variance among q, f, rho only
+    engagement_dims = [q, f, rho]
+    engagement_mean = sum(engagement_dims) / 3
+    engagement_var = sum((d - engagement_mean) ** 2 for d in engagement_dims) / 3
+    engagement_texture = math.sqrt(engagement_var)
+
+    _SUPPRESSION_CALIBRATIONS = {
+        "clinical_therapeutic", "crisis_translation", "neurodivergent",
+    }
+    _UNDERSTATEMENT_CALIBRATIONS = {
+        "indigenous_oral", "spiritual_contemplative",
+    }
+
+    if psi > 0.7 and q < 0.2 and f < 0.2 and engagement_texture < 0.15:
+        if calibration in _SUPPRESSION_CALIBRATIONS:
+            flags.append("possible_suppression")
+        elif calibration in _UNDERSTATEMENT_CALIBRATIONS:
+            note = "understatement consistent with calibration context"
+
     # Biological plausibility via q optimization
     q_opt = biological_optimization(q, cal.km, cal.ki)
     q_ratio = q_opt / q if q > 0 else 1.0
@@ -407,13 +431,16 @@ def veritas_check(
     authenticity_score -= 0.15 * len(flags)
     authenticity_score = max(authenticity_score, 0.0)
 
-    return {
+    result = {
         "authenticity_score": round(authenticity_score, 4),
         "flags": flags,
         "dimensional_texture": round(dimensional_texture, 4),
         "q_biological_ratio": round(q_ratio, 4),
         "assessment": "genuine" if not flags else "review_recommended",
     }
+    if note:
+        result["note"] = note
+    return result
 
 
 # =============================================================================
@@ -520,7 +547,7 @@ class RoseGlassEngine:
             kappa=cal.kappa,
         )
 
-        ver = veritas_check(psi, rho, q, f, cal)
+        ver = veritas_check(psi, rho, q, f, cal, calibration=calibration)
 
         return RoseGlassScore(
             psi=round(psi, 4),

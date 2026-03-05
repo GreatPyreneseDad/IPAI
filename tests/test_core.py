@@ -16,6 +16,8 @@ from src.core.rose_glass_v2 import (
     lambda_decomposition,
     veritas_check,
     DimensionalCalibration,
+    CulturalCalibration,
+    CALIBRATION_PRESETS,
     RoseGlassEngine,
     RoseGlassScore,
 )
@@ -238,6 +240,42 @@ class TestVeritasCheck:
         """Genuine expression should have dimensional texture > 0."""
         result = veritas_check(0.3, 0.7, 0.5, 0.2)
         assert result["dimensional_texture"] > 0.0
+
+    def test_suppression_flagged_clinical_therapeutic(self):
+        """'I am fine' pattern: high psi, low q/f, minimal texture → flag in clinical."""
+        # Suppression signature: high psi, near-zero q and f
+        result = veritas_check(
+            psi=0.8, rho=0.1, q=0.1, f=0.05,
+            calibration="clinical_therapeutic",
+        )
+        assert "possible_suppression" in result["flags"]
+        assert result["assessment"] == "review_recommended"
+
+    def test_suppression_not_flagged_legal_adversarial(self):
+        """Same suppression pattern should NOT flag in legal_adversarial."""
+        result = veritas_check(
+            psi=0.8, rho=0.1, q=0.1, f=0.05,
+            calibration="legal_adversarial",
+        )
+        assert "possible_suppression" not in result["flags"]
+
+    def test_understatement_note_indigenous_oral(self):
+        """Suppression pattern in indigenous_oral → note, no flag."""
+        result = veritas_check(
+            psi=0.8, rho=0.1, q=0.1, f=0.05,
+            calibration="indigenous_oral",
+        )
+        assert "possible_suppression" not in result["flags"]
+        assert result.get("note") == "understatement consistent with calibration context"
+
+    def test_suppression_not_flagged_western_academic(self):
+        """Suppression pattern should NOT flag in western_academic."""
+        result = veritas_check(
+            psi=0.8, rho=0.1, q=0.1, f=0.05,
+            calibration="western_academic",
+        )
+        assert "possible_suppression" not in result["flags"]
+        assert "note" not in result
 
 
 class TestAnalyzeTextLLM:

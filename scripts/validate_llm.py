@@ -17,7 +17,7 @@ import os
 # Allow running from repo root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.core.rose_glass_v2 import RoseGlassEngine, veritas_check
+from src.core.rose_glass_v2 import RoseGlassEngine, veritas_check, CulturalCalibration
 
 # ---------------------------------------------------------------------------
 # Reference corpus
@@ -199,6 +199,40 @@ def run_validation():
                 print(f"    {DIM_LABELS[dim].strip():>3}: {src:<9s} -> {note}")
 
         print()
+
+    # --- "I am fine" across all calibrations ---
+    print("=" * 72)
+    print("  VERITAS SUPPRESSION CHECK: \"I am fine\" × all calibrations")
+    print("=" * 72)
+
+    fine_text = "I am fine."
+    fine_dims = engine._llm_estimate_dimensions(fine_text)
+    if fine_dims is None:
+        fine_dims = engine._heuristic_estimate_dimensions(fine_text)
+        fine_source = "heuristic"
+    else:
+        fine_source = "hybrid"
+
+    print(f"  Dimensions (source: {fine_source}):")
+    for dim in DIMS:
+        print(f"    {DIM_LABELS[dim].strip():>3}: {fine_dims[dim]:.3f}")
+    print()
+
+    for cal in CulturalCalibration:
+        cal_obj = engine.get_calibration(cal.value)
+        v = veritas_check(
+            fine_dims["psi"], fine_dims["rho"],
+            fine_dims["q"], fine_dims["f"],
+            cal=cal_obj, calibration=cal.value,
+        )
+        flag_str = ", ".join(v["flags"]) if v["flags"] else "(none)"
+        note_str = v.get("note", "")
+        line = f"  {cal.value:<28s}  auth={v['authenticity_score']:.2f}  texture={v['dimensional_texture']:.4f}  flags={flag_str}"
+        if note_str:
+            line += f"  note=\"{note_str}\""
+        print(line)
+
+    print()
 
     # --- summary ---
     print("=" * 72)
