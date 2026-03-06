@@ -19,7 +19,8 @@ Source type -> calibration mapping:
     neurodivergent_community -> neurodivergent
 
 Usage:
-    python3 scripts/news_compare.py
+    python3 scripts/news_compare.py           # Real story (default)
+    python3 scripts/news_compare.py --demo     # Fictional public health demo
 """
 
 import math
@@ -108,6 +109,21 @@ def compare_sources(sources: list[dict], engine: RoseGlassEngine) -> dict:
 # ---------------------------------------------------------------------------
 # Display functions
 # ---------------------------------------------------------------------------
+
+def print_calibration_map(results: list[dict]):
+    """Print the source type -> calibration mapping used in this run."""
+    print("=" * 78)
+    print("  SOURCE TYPE -> CALIBRATION MAPPING")
+    print("=" * 78)
+    print()
+    seen = set()
+    for r in results:
+        key = (r["source_type"], r["calibration"])
+        if key not in seen:
+            seen.add(key)
+            print(f"    {r['source_type']:<28s}  ->  {r['calibration']}")
+    print()
+
 
 def print_per_source(results: list[dict]):
     """Section 1: Per-source dimensional scores."""
@@ -227,7 +243,61 @@ def print_summary(results: list[dict], divergence: dict):
 
 
 # ---------------------------------------------------------------------------
-# Demo corpus: fictional public health policy announcement
+# Real story: US-Israeli military strikes on Iran, March 5 2026
+# ---------------------------------------------------------------------------
+
+IRAN_SOURCES = [
+    {
+        "source_name": "CNN",
+        "source_type": "mainstream_secular",
+        "text": (
+            "Israel said it has begun a broad-scale wave of strikes on regime "
+            "infrastructure in Tehran. Defense Secretary Pete Hegseth signaled "
+            "that the war will escalate, saying the conflict has only just begun. "
+            "President Trump said he has no time limits on how long the war could "
+            "go on. The US has hit 200 targets deep inside Iran in the last 72 hours."
+        ),
+    },
+    {
+        "source_name": "Al Jazeera",
+        "source_type": "indigenous_press",
+        "text": (
+            "Tehran, Iran — The war might last weeks, so my family and I will "
+            "only leave if it gets too bad. For now, life goes on. The booming "
+            "sound of explosions has been a daily reality. Iranian authorities "
+            "are blocking access to the global internet for a sixth day as the "
+            "bombs fall. The internet in Iran is disconnected. We are left without "
+            "news while state television says Iran is on the verge of taking over "
+            "Tel Aviv and Washington."
+        ),
+    },
+    {
+        "source_name": "UK PM Statement",
+        "source_type": "legal_regulatory",
+        "text": (
+            "Iran has now fired drones and missiles at ten countries that did "
+            "not attack them. Our number one priority is protecting our people. "
+            "My focus is providing calm, level-headed leadership in the national "
+            "interest. That means deploying our military and diplomatic strength "
+            "to protect our people. The goal is a negotiated settlement with Iran "
+            "where they give up their nuclear ambitions."
+        ),
+    },
+    {
+        "source_name": "Fox News",
+        "source_type": "crisis_breaking",
+        "text": (
+            "Trump says he does not care if Iran pulls out of the 2026 World Cup. "
+            "Republicans rejected a resolution aimed at requiring Trump seek "
+            "congressional approval for future military action against Tehran. "
+            "The US would start striking progressively deeper into Iran. Israel "
+            "vows to kill Iran's next supreme leader."
+        ),
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Fictional demo corpus: public health policy announcement
 # ---------------------------------------------------------------------------
 
 DEMO_SOURCES = [
@@ -316,18 +386,19 @@ DEMO_SOURCES = [
 ]
 
 
-def run_demo():
-    """Run the built-in demo with the fictional public health story."""
+def run_comparison(sources: list[dict], title: str):
+    """Run the comparison for a given source set."""
     engine = RoseGlassEngine()
 
     print()
     print("  ROSE GLASS NEWS COMPARISON TOOL")
-    print("  Story: Public Health Air Quality Monitoring Policy")
-    print(f"  Sources: {len(DEMO_SOURCES)}")
+    print(f"  Story: {title}")
+    print(f"  Sources: {len(sources)}")
     print()
 
-    comparison = compare_sources(DEMO_SOURCES, engine)
+    comparison = compare_sources(sources, engine)
 
+    print_calibration_map(comparison["results"])
     print_per_source(comparison["results"])
     print_comparison_table(comparison["results"])
     print_divergence(comparison["divergence"])
@@ -341,4 +412,13 @@ def run_demo():
 
 
 if __name__ == "__main__":
-    run_demo()
+    if "--demo" in sys.argv:
+        run_comparison(
+            DEMO_SOURCES,
+            "Public Health Air Quality Monitoring Policy (fictional)",
+        )
+    else:
+        run_comparison(
+            IRAN_SOURCES,
+            "US-Israeli Military Strikes on Iran — Day 5, March 5 2026",
+        )
