@@ -13,13 +13,17 @@ ROSE Corp. | MacGregor Holding Company
 
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src.core.rose_glass_v2 import RoseGlassEngine, CulturalCalibration
+from src.core.rose_glass_v2 import (
+    RoseGlassEngine, CulturalCalibration,
+    ConversationSession, analyze_conversation,
+)
 
 # =============================================================================
 # APP SETUP
@@ -52,6 +56,15 @@ def _init_db():
             calibration TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            session_id TEXT PRIMARY KEY,
+            calibration TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            turns_json TEXT NOT NULL DEFAULT '[]'
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -79,6 +92,18 @@ _init_db()
 # =============================================================================
 
 VALID_CALIBRATIONS = [c.value for c in CulturalCalibration]
+
+
+class ConversationStartRequest(BaseModel):
+    calibration: Optional[str] = Field(
+        "western_academic",
+        description=f"Cultural calibration preset. Valid: {VALID_CALIBRATIONS}",
+    )
+
+
+class ConversationTurnRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID from /conversation/start")
+    text: str = Field(..., min_length=1, description="Text for this turn")
 
 
 class TextAnalysisRequest(BaseModel):
@@ -173,5 +198,87 @@ def analyze_dimensions(request: DimensionalAnalysisRequest):
         response_data=result,
         calibration=calibration,
     )
+
+    return result
+
+
+# =============================================================================
+# CONVERSATION ENDPOINTS (Phase 3)
+# =============================================================================
+
+# In-memory session store (SQLite persists for durability)
+_conversation_sessions: dict[str, ConversationSession] = {}
+
+
+def _persist_conversation(session: ConversationSession):
+    """Write conversation state to SQLite."""
+    turns_data = [
+        {"text": text, "score": score.to_dict()}
+        for text, score in session.turns
+    ]
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        """INSERT OR REPLACE INTO conversations
+           (session_id, calibration, created_at, updated_at, turns_json)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            session.session_id,
+            session.calibration,
+            session.created_at.isoformat(),
+            session.updated_at.isoformat(),
+            json.dumps(turns_data),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+@app.post("/conversation/start")
+def conversation_start(request: ConversationStartRequest):
+    calibration = request.calibration or "western_academic"
+    if calibration not in VALID_CALIBRATIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid calibration '{calibration}'. Valid: {VALID_CALIBRATIONS}",
+        )
+
+    session_id = str(uuid.uuid4())
+    session = ConversationSession(session_id=session_id, calibration=calibration)
+    _conversation_sessions[session_id] = session
+    _persist_conversation(session)
+
+    return {"session_id": session_id, "calibration": calibration}
+
+
+@app.post("/conversation/turn")
+def conversation_turn(request: ConversationTurnRequest):
+    session = _conversation_sessions.get(request.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    score = engine.analyze_text(request.text, calibration=session.calibration)
+    session.add_turn(request.text, score)
+    _persist_conversation(session)
+
+    result: dict[str, Any] = {"turn": len(session.turns), "score": score.to_dict()}
+
+    if len(session.turns) >= 2:
+        gradient = analyze_conversation(session)
+        result["gradient"] = gradient.to_dict()
+
+    return result
+
+
+@app.get("/conversation/{session_id}")
+def conversation_get(session_id: str):
+    session = _conversation_sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = session.to_dict()
+
+    if len(session.turns) >= 2:
+        gradient = analyze_conversation(session)
+        result["gradient"] = gradient.to_dict()
 
     return result

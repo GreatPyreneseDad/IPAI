@@ -55,9 +55,16 @@ REFERENCE_TEXTS = [
         "expected": "high psi, low q, moderate rho",
     },
     {
-        "label": "Flat affect",
-        "text": "I am fine.",
-        "expected": "low dimensional texture — veritas should flag",
+        "label": "Performed stability",
+        "text": (
+            "I keep telling everyone I'm handling it. I've been handling it "
+            "for three years. I handle everything."
+        ),
+        "expected": (
+            "high psi surface, high rho (compressed experience), low q expressed, "
+            "high lambda (decay under sustained load), veritas should flag "
+            "performed stability in clinical_therapeutic"
+        ),
     },
     {
         "label": "Intergenerational memory",
@@ -200,29 +207,33 @@ def run_validation():
 
         print()
 
-    # --- "I am fine" across all calibrations ---
+    # --- "Performed stability" across all calibrations ---
     print("=" * 72)
-    print("  VERITAS SUPPRESSION CHECK: \"I am fine\" × all calibrations")
+    print("  VERITAS SUPPRESSION CHECK: performed stability × all calibrations")
     print("=" * 72)
 
-    fine_text = "I am fine."
-    fine_dims = engine._llm_estimate_dimensions(fine_text)
-    if fine_dims is None:
-        fine_dims = engine._heuristic_estimate_dimensions(fine_text)
-        fine_source = "heuristic"
+    ps_text = (
+        "I keep telling everyone I'm handling it. I've been handling it "
+        "for three years. I handle everything."
+    )
+    ps_dims = engine._llm_estimate_dimensions(ps_text)
+    if ps_dims is None:
+        ps_dims = engine._heuristic_estimate_dimensions(ps_text)
+        ps_source = "heuristic"
     else:
-        fine_source = "hybrid"
+        ps_source = "hybrid"
 
-    print(f"  Dimensions (source: {fine_source}):")
+    print(f"  Text: \"{ps_text}\"")
+    print(f"  Dimensions (source: {ps_source}):")
     for dim in DIMS:
-        print(f"    {DIM_LABELS[dim].strip():>3}: {fine_dims[dim]:.3f}")
+        print(f"    {DIM_LABELS[dim].strip():>3}: {ps_dims[dim]:.3f}")
     print()
 
     for cal in CulturalCalibration:
         cal_obj = engine.get_calibration(cal.value)
         v = veritas_check(
-            fine_dims["psi"], fine_dims["rho"],
-            fine_dims["q"], fine_dims["f"],
+            ps_dims["psi"], ps_dims["rho"],
+            ps_dims["q"], ps_dims["f"],
             cal=cal_obj, calibration=cal.value,
         )
         flag_str = ", ".join(v["flags"]) if v["flags"] else "(none)"

@@ -242,8 +242,7 @@ class TestVeritasCheck:
         assert result["dimensional_texture"] > 0.0
 
     def test_suppression_flagged_clinical_therapeutic(self):
-        """'I am fine' pattern: high psi, low q/f, minimal texture → flag in clinical."""
-        # Suppression signature: high psi, near-zero q and f
+        """Performed stability pattern: high psi surface, low q/f → flag in clinical."""
         result = veritas_check(
             psi=0.8, rho=0.1, q=0.1, f=0.05,
             calibration="clinical_therapeutic",

@@ -24,7 +24,9 @@ ROSE Corp. | MacGregor Holding Company
 
 import json
 import math
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 
@@ -729,3 +731,172 @@ class RoseGlassEngine:
             tau=dims["tau"], lambda_=dims["lambda_"],
             calibration=calibration,
         )
+
+
+# =============================================================================
+# PHASE 3 — CONVERSATIONAL GRADIENT TRACKING
+# =============================================================================
+
+@dataclass
+class ConversationSession:
+    """A multi-turn conversation tracked for gradient analysis."""
+    session_id: str
+    turns: List[Tuple[str, RoseGlassScore]] = field(default_factory=list)
+    calibration: str = "western_academic"
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def add_turn(self, text: str, score: RoseGlassScore) -> None:
+        self.turns.append((text, score))
+        self.updated_at = datetime.now(timezone.utc)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "calibration": self.calibration,
+            "turns_count": len(self.turns),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "turns": [
+                {"text": text, "score": score.to_dict()}
+                for text, score in self.turns
+            ],
+        }
+
+
+_GRADIENT_DIMS = ("psi", "rho", "q_raw", "f", "tau", "lambda_")
+
+
+def _extract_dim(score: RoseGlassScore, dim: str) -> float:
+    return getattr(score, dim)
+
+
+def _classify_dim_trajectory(deltas: List[float]) -> str:
+    """Classify a dimension's trajectory from its per-turn deltas."""
+    if not deltas:
+        return "stable"
+    pos = sum(1 for d in deltas if d > 0.05)
+    neg = sum(1 for d in deltas if d < -0.05)
+    n = len(deltas)
+    if pos > n * 0.6:
+        return "rising"
+    if neg > n * 0.6:
+        return "falling"
+    if pos > 0 and neg > 0 and (pos + neg) > n * 0.5:
+        return "volatile"
+    return "stable"
+
+
+def _classify_coherence_trend(coherence_values: List[float]) -> str:
+    """Classify coherence trend from sequence of coherence values."""
+    if len(coherence_values) < 2:
+        return "stable"
+    deltas = [coherence_values[i+1] - coherence_values[i]
+              for i in range(len(coherence_values) - 1)]
+    avg_delta = sum(deltas) / len(deltas)
+    if avg_delta > 0.05:
+        return "improving"
+    if avg_delta < -0.05:
+        return "degrading"
+    return "stable"
+
+
+def _generate_signal(
+    trajectories: Dict[str, str],
+    performed_stability: bool,
+    coherence_trend: str,
+) -> str:
+    """Generate a plain-language signal sentence."""
+    if performed_stability:
+        return ("Psi remains stable while emotional activation stays suppressed "
+                "across multiple turns — consistent with performed stability "
+                "that single-turn analysis cannot detect.")
+
+    parts = []
+    for dim, traj in trajectories.items():
+        if traj in ("rising", "falling"):
+            label = {"psi": "consistency", "rho": "wisdom depth",
+                     "q_raw": "emotional activation", "f": "social engagement",
+                     "tau": "temporal anchoring", "lambda_": "decay pressure"}
+            parts.append(f"{label.get(dim, dim)} is {traj}")
+
+    if not parts and coherence_trend == "stable":
+        return "Dimensions are stable across turns — no gradient signal."
+
+    if coherence_trend != "stable":
+        parts.append(f"overall coherence is {coherence_trend}")
+
+    if not parts:
+        return "Dimensions are stable across turns — no gradient signal."
+
+    return "Across turns: " + "; ".join(parts) + "."
+
+
+@dataclass
+class GradientAnalysis:
+    """Result of gradient tracking across conversational turns."""
+    dimension_deltas: Dict[str, List[float]]
+    trajectory: Dict[str, str]
+    performed_stability_flag: bool
+    coherence_trend: str
+    turns_analyzed: int
+    signal: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "dimension_deltas": {k: [round(d, 4) for d in v]
+                                 for k, v in self.dimension_deltas.items()},
+            "trajectory": self.trajectory,
+            "performed_stability_flag": self.performed_stability_flag,
+            "coherence_trend": self.coherence_trend,
+            "turns_analyzed": self.turns_analyzed,
+            "signal": self.signal,
+        }
+
+
+def analyze_conversation(session: ConversationSession) -> GradientAnalysis:
+    """
+    Compute gradient analysis from a ConversationSession.
+
+    Requires at least 2 turns to produce meaningful deltas.
+    Performed stability detection requires 3+ turns.
+    """
+    scores = [score for _, score in session.turns]
+    n = len(scores)
+
+    # Per-turn deltas for each dimension
+    dimension_deltas: Dict[str, List[float]] = {}
+    for dim in _GRADIENT_DIMS:
+        values = [_extract_dim(s, dim) for s in scores]
+        deltas = [values[i+1] - values[i] for i in range(len(values) - 1)]
+        dimension_deltas[dim] = deltas
+
+    # Trajectory classification
+    trajectory = {dim: _classify_dim_trajectory(dimension_deltas[dim])
+                  for dim in _GRADIENT_DIMS}
+
+    # Performed stability: psi variance < 0.1 across 3+ turns while q < 0.2 throughout
+    performed_stability = False
+    if n >= 3:
+        psi_values = [_extract_dim(s, "psi") for s in scores]
+        q_values = [_extract_dim(s, "q_raw") for s in scores]
+        psi_mean = sum(psi_values) / len(psi_values)
+        psi_var = sum((v - psi_mean) ** 2 for v in psi_values) / len(psi_values)
+        all_q_low = all(q < 0.2 for q in q_values)
+        if psi_var < 0.1 and all_q_low:
+            performed_stability = True
+
+    # Coherence trend
+    coherence_values = [s.coherence for s in scores]
+    coherence_trend = _classify_coherence_trend(coherence_values)
+
+    signal = _generate_signal(trajectory, performed_stability, coherence_trend)
+
+    return GradientAnalysis(
+        dimension_deltas=dimension_deltas,
+        trajectory=trajectory,
+        performed_stability_flag=performed_stability,
+        coherence_trend=coherence_trend,
+        turns_analyzed=n,
+        signal=signal,
+    )
