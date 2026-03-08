@@ -15,18 +15,22 @@ from typing import Optional
 
 import psycopg2
 import requests
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from scripts.run_analysis import run_analysis
 
-# ── config ────────────────────────────────────────────────────────────────────
-SUPABASE_DB_URL  = os.environ["SUPABASE_DB_URL"]
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-ANTHROPIC_URL    = "https://api.anthropic.com/v1/messages"
-MODEL            = "claude-sonnet-4-20250514"
+# ── config — lazy so missing env vars don't crash at import time ──────────────
+def _cfg(key: str) -> str:
+    val = os.environ.get(key, "")
+    if not val:
+        raise RuntimeError(f"Missing required env var: {key}")
+    return val
+
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+MODEL         = "claude-sonnet-4-20250514"
 
 STANDING_TOPICS = [
     "IRAN","UKRAINE","CLIMATE","ELECTION","ECONOMY",
@@ -38,7 +42,7 @@ router = APIRouter(prefix="/news", tags=["news"])
 
 # ── db ────────────────────────────────────────────────────────────────────────
 def get_db():
-    return psycopg2.connect(SUPABASE_DB_URL, sslmode="require")
+    return psycopg2.connect(_cfg("SUPABASE_DB_URL"), sslmode="require")
 
 def is_cached(conn, topic: str, date_str: str) -> bool:
     cur = conn.cursor()
@@ -158,7 +162,7 @@ def _generate_poem(source: dict) -> tuple:
         resp = requests.post(
             ANTHROPIC_URL,
             headers={
-                "x-api-key": ANTHROPIC_API_KEY,
+                "x-api-key": _cfg("ANTHROPIC_API_KEY"),
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
