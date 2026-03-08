@@ -282,3 +282,11 @@ def conversation_get(session_id: str):
         result["gradient"] = gradient.to_dict()
 
     return result
+
+
+# =============================================================================
+# NEWS ROUTER
+# =============================================================================
+
+from routers.news import router as news_router
+app.include_router(news_router)
