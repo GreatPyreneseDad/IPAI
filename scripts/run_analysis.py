@@ -91,6 +91,8 @@ def _fetch_text(url: str, timeout: int = 10) -> str:
 
 def _gdelt_query(topic: str, date: str, limit: int) -> list[dict]:
     client = bigquery.Client(project=PROJECT_ID)
+    topic_title = topic.title()
+    topic_upper = topic.upper()
     query = """
         SELECT
             DocumentIdentifier AS url,
@@ -99,20 +101,25 @@ def _gdelt_query(topic: str, date: str, limit: int) -> list[dict]:
             DATE AS date
         FROM `gdelt-bq.gdeltv2.gkg_partitioned`
         WHERE _PARTITIONTIME = TIMESTAMP(@partition_date)
-            AND V2Themes LIKE @theme_pattern
+            AND (
+                V2Locations LIKE @topic_title
+                OR V2Themes LIKE @topic_upper
+                OR V2Persons LIKE @topic_title
+                OR V2Organizations LIKE @topic_title
+            )
         LIMIT @limit
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter("partition_date", "STRING", date),
-            bigquery.ScalarQueryParameter("theme_pattern", "STRING", f"%{topic.upper()}%"),
+            bigquery.ScalarQueryParameter("topic_title", "STRING", f"%{topic_title}%"),
+            bigquery.ScalarQueryParameter("topic_upper", "STRING", f"%{topic_upper}%"),
             bigquery.ScalarQueryParameter("limit", "INT64", limit * 4),
         ]
     )
     rows = client.query(query, job_config=job_config).result()
     articles = []
     for row in rows:
-        tone_parts = (row.v2tone or "").split(",")
         articles.append({
             "url": row.url,
             "source": row.source or _extract_domain(row.url),
