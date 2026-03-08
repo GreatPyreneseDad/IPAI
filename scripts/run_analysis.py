@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.core.rose_glass_v2 import RoseGlassEngine
 from scripts.news_compare import SOURCE_CALIBRATIONS, compare_sources
 
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "project-cbd5d6c3-e99a-41b4-bf5")
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "triad-web-analyzer")
 
 DOMAIN_SOURCE_MAP = {
     "cnn.com": "mainstream_secular",

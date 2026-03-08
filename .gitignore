@@ -38,3 +38,4 @@ build/
 .pytest_cache/
 htmlcov/
 .coverage
+\n# GCP service account key — never commit\ngcp-railway-key.json
