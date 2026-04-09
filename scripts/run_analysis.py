@@ -1,6 +1,9 @@
 """
 run_analysis.py — callable wrapper around GDELT + Rose Glass pipeline
 Returns structured dict matching the Supabase schema.
+
+v2: Uses CERATA bridge for real dimensional computation instead of
+    keyword heuristics. Falls back to heuristic if bridge unreachable.
 """
 
 import re
@@ -17,6 +20,12 @@ from src.core.rose_glass_v2 import RoseGlassEngine
 from scripts.news_compare import SOURCE_CALIBRATIONS, compare_sources
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "triad-web-analyzer")
+
+# CERATA v2 bridge — real dimensional computation via spaCy NLP
+CERATA_BRIDGE_URL = os.environ.get(
+    "CERATA_BRIDGE_URL",
+    "https://cerata-nematocysts-production.up.railway.app"
+)
 
 DOMAIN_SOURCE_MAP = {
     "cnn.com": "mainstream_secular",
@@ -128,9 +137,134 @@ def _gdelt_query(topic: str, date: str, limit: int) -> list[dict]:
     return articles
 
 
+# =============================================================================
+# CERATA BRIDGE INTEGRATION
+# =============================================================================
+
+def _bridge_perceive(text: str, timeout: int = 15) -> dict | None:
+    """
+    Call CERATA v2 bridge for real dimensional computation.
+    Returns dict with psi, rho, q, f, tau, lambda_ or None on failure.
+    
+    The bridge uses spaCy NLP for:
+    - psi: POS diversity, entity density, sentence consistency
+    - rho: emergent topology (temporal grounding, reflective register, aphoristic density)
+    - q: Michaelis-Menten optimized emotional activation
+    - f: text-derived relational graph (belonging, influence, reach)
+    """
+    try:
+        resp = requests.post(
+            f"{CERATA_BRIDGE_URL}/cx",
+            json={"text": text[:3000]},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return None
+
+        zones = data.get("zones", {})
+        details = data.get("zone_details", {})
+
+        # Extract computed dimensions from bridge response
+        psi_detail = details.get("psi", {})
+        rho_detail = details.get("rho", {})
+        q_detail = details.get("q", {})
+        f_detail = details.get("f", {})
+
+        return {
+            "psi": psi_detail.get("psi", zones.get("psi", {}).get("A", 0.5)),
+            "rho": rho_detail.get("wisdom_score", zones.get("rho", {}).get("A", 0.3)),
+            "q": q_detail.get("raw_q", q_detail.get("optimized_q", zones.get("q", {}).get("A", 0.3))),
+            "f": f_detail.get("belonging_score", zones.get("f", {}).get("A", 0.1)),
+            "tau": data.get("tau", 0.5),
+            "lambda_": data.get("lambda", 0.3),
+            "compute_source": "cerata-nematocysts-v2",
+            "cx": data.get("Cx", 0.0),
+            "veritas_ratio": data.get("veritas_ratio", 1.0),
+            "has_dark_spot": data.get("has_dark_spot", False),
+            "rho_method": rho_detail.get("method", "unknown"),
+            "rho_maturity": rho_detail.get("maturity_level", "unknown"),
+            "rho_components": rho_detail.get("component_scores", {}),
+            "psi_method": psi_detail.get("method", "unknown"),
+            "psi_entities": psi_detail.get("entities", []),
+        }
+    except Exception as e:
+        print(f"[bridge] CERATA bridge error: {e}")
+        return None
+
+
+def compare_sources_with_bridge(raw_sources: list[dict], engine: RoseGlassEngine) -> dict:
+    """
+    Run each source through CERATA bridge first, fall back to heuristic.
+    Uses bridge-computed dimensions fed into engine.analyze_dimensions()
+    for coherence/resilience/veritas calculations.
+    """
+    import math
+    results = []
+    bridge_hits = 0
+    bridge_misses = 0
+
+    for src in raw_sources:
+        source_type = src["source_type"]
+        calibration = SOURCE_CALIBRATIONS.get(source_type, "western_academic")
+
+        # Try bridge first
+        bridge_dims = _bridge_perceive(src["text"])
+
+        if bridge_dims:
+            bridge_hits += 1
+            score = engine.analyze_dimensions(
+                psi=bridge_dims["psi"],
+                rho=bridge_dims["rho"],
+                q=bridge_dims["q"],
+                f=bridge_dims["f"],
+                tau=bridge_dims.get("tau", 0.5),
+                lambda_=bridge_dims.get("lambda_", 0.3),
+                calibration=calibration,
+            )
+        else:
+            bridge_misses += 1
+            # Fallback to heuristic
+            score = engine.analyze_text(src["text"], calibration=calibration)
+
+        results.append({
+            "source_name": src["source_name"],
+            "source_type": source_type,
+            "calibration": calibration,
+            "score": score,
+            "compute_source": bridge_dims.get("compute_source", "heuristic-fallback") if bridge_dims else "heuristic-fallback",
+            "bridge_meta": bridge_dims if bridge_dims else None,
+        })
+
+    # Compute per-dimension divergence
+    DIMS = ["psi", "rho", "q_raw", "f", "tau", "lambda_", "coherence"]
+    DIM_LABELS = {
+        "psi": "Psi (consistency)", "rho": "Rho (wisdom)",
+        "q_raw": "q (activation)", "f": "f (social)",
+        "tau": "Tau (temporal)", "lambda_": "Lambda (decay)",
+        "coherence": "Coherence",
+    }
+    divergence = {}
+    for dim in DIMS:
+        values = [getattr(r["score"], dim) for r in results]
+        mean = sum(values) / len(values) if values else 0
+        var = sum((v - mean) ** 2 for v in values) / len(values) if values else 0
+        divergence[dim] = {
+            "label": DIM_LABELS.get(dim, dim),
+            "values": values,
+            "mean": round(mean, 4),
+            "variance": round(var, 4),
+            "std_dev": round(math.sqrt(var), 4),
+        }
+
+    print(f"[bridge] CERATA hits: {bridge_hits}, fallbacks: {bridge_misses}")
+    return {"results": results, "divergence": divergence}
+
+
 def run_analysis(topic: str, date_str: str, limit: int = 10) -> dict:
     """
-    Full pipeline: GDELT → article fetch → Rose Glass scoring.
+    Full pipeline: GDELT → article fetch → CERATA bridge scoring.
     Returns dict with keys: sources, divergence.
     Each source has: source_name, source_type, calibration, url,
                      article_text, dimensions, coherence, veritas
@@ -168,7 +302,9 @@ def run_analysis(topic: str, date_str: str, limit: int = 10) -> dict:
         return {"sources": [], "divergence": {}}
 
     engine = RoseGlassEngine()
-    comparison = compare_sources(raw_sources, engine)
+
+    # Use CERATA bridge with heuristic fallback
+    comparison = compare_sources_with_bridge(raw_sources, engine)
 
     # Shape results to match Supabase schema
     out_sources = []
@@ -190,9 +326,10 @@ def run_analysis(topic: str, date_str: str, limit: int = 10) -> dict:
             },
             "coherence": score.coherence,
             "veritas": {
-                "authenticity_score": getattr(score, "veritas_score", None),
-                "flags": getattr(score, "veritas_flags", []),
+                "authenticity_score": score.veritas.get("authenticity_score") if score.veritas else None,
+                "flags": score.veritas.get("flags", []) if score.veritas else [],
             },
+            "compute_source": r.get("compute_source", "unknown"),
         })
 
     return {"sources": out_sources, "divergence": comparison.get("divergence", {})}

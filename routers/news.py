@@ -14,6 +14,7 @@ from datetime import date as date_type
 from typing import Optional
 
 import psycopg2
+import psycopg2.extras
 import requests
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
@@ -289,3 +290,127 @@ def poem_ingest(req: PoemRequest):
         concurrent.futures.wait([ex.submit(_process, s) for s in sources])
 
     return {"processed": len(sources), **stats}
+
+
+# ── temporal intelligence endpoints ───────────────────────────────────────────
+
+from scripts.temporal_agent import (
+    build_timeline, get_build_status, get_timeline_points,
+    add_annotation,
+)
+from datetime import date as _date, datetime as _datetime
+
+
+class TimelineBuildRequest(BaseModel):
+    topic: str
+    start_date: str   # YYYY-MM-DD
+    end_date: str     # YYYY-MM-DD
+
+
+class AnnotateRequest(BaseModel):
+    topic: str
+    point_date: str
+    annotation_type: str  # context, pattern_label, cross_topic
+    content: str
+    cross_topic: Optional[str] = None
+
+
+@router.post("/timeline-build")
+def timeline_build(req: TimelineBuildRequest, background_tasks: BackgroundTasks):
+    """
+    Start a temporal timeline build. Runs in background for long spans.
+    Returns build_id immediately for progress polling.
+    """
+    topic = req.topic.upper().strip()
+    try:
+        sd = _date.fromisoformat(req.start_date)
+        ed = _date.fromisoformat(req.end_date)
+    except ValueError:
+        return {"error": "Invalid date format. Use YYYY-MM-DD."}, 400
+
+    if ed <= sd:
+        return {"error": "end_date must be after start_date."}, 400
+
+    span_days = (ed - sd).days
+
+    # Short spans: run synchronously. Long spans: background.
+    if span_days <= 30:
+        try:
+            result = build_timeline(topic, sd, ed)
+            return result
+        except Exception as e:
+            return {"error": str(e)}, 500
+    else:
+        # Create build record first, return ID for polling
+        conn = get_db()
+        cur = conn.cursor()
+        from scripts.temporal_agent import calculate_intervals
+        points = calculate_intervals(sd, ed)
+        interval = max(1, span_days // max(len(points), 1))
+        cur.execute(
+            """INSERT INTO timeline_builds
+               (topic, start_date, end_date, interval_days,
+                total_points, status)
+               VALUES (%s,%s,%s,%s,%s,'pending')
+               ON CONFLICT (topic, start_date, end_date) DO UPDATE
+                 SET status='pending', points_completed=0,
+                     points_reused=0, completed_at=NULL
+               RETURNING id""",
+            (topic, sd, ed, interval, len(points))
+        )
+        build_id = str(cur.fetchone()[0])
+        conn.commit()
+        conn.close()
+
+        background_tasks.add_task(build_timeline, topic, sd, ed)
+        return {"build_id": build_id, "status": "building", "topic": topic}
+
+
+@router.get("/timeline-status/{build_id}")
+def timeline_status(build_id: str):
+    """Poll build progress. Frontend calls this every 2 seconds."""
+    status = get_build_status(build_id)
+    if not status:
+        return {"error": "Build not found"}, 404
+    return status
+
+
+@router.get("/timeline-points/{topic}")
+def timeline_points_endpoint(topic: str, start: str = None, end: str = None):
+    """Get all shared pool points for a topic."""
+    sd = _date.fromisoformat(start) if start else None
+    ed = _date.fromisoformat(end) if end else None
+    points = get_timeline_points(topic, sd, ed)
+    return {"topic": topic.upper(), "points": points}
+
+
+@router.post("/annotate")
+def annotate(req: AnnotateRequest):
+    """User write-back: add annotation to shared pool."""
+    if req.annotation_type not in ("context", "pattern_label", "cross_topic"):
+        return {"error": "Invalid annotation_type"}, 400
+    ann_id = add_annotation(
+        req.topic, req.point_date, req.annotation_type,
+        req.content, req.cross_topic,
+    )
+    return {"annotation_id": ann_id, "status": "stored"}
+
+
+@router.get("/annotations/{topic}")
+def get_annotations(topic: str):
+    """Get all annotations for a topic."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """SELECT id, topic, point_date::text, start_date::text,
+                  end_date::text, annotation_type, content,
+                  cross_topic, upvotes, created_at::text
+           FROM user_annotations
+           WHERE topic = %s ORDER BY point_date ASC""",
+        (topic.upper(),)
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    for r in rows:
+        r["id"] = str(r["id"])
+    conn.close()
+    return {"topic": topic.upper(), "annotations": rows}

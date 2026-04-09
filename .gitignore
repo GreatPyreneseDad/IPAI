@@ -39,3 +39,5 @@ build/
 htmlcov/
 .coverage
 \n# GCP service account key — never commit\ngcp-railway-key.json
+gcp-railway-key.json
+gcp-railway-key.json
