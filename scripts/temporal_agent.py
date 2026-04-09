@@ -174,7 +174,16 @@ def link_build_point(conn, build_id: str, point_id: str,
 # ── CERATA bridge scoring ────────────────────────────────────────────────────
 
 def bridge_score(text: str, timeout: int = 15) -> Optional[dict]:
-    """Call CERATA v2 bridge. Returns dimension dict or None on failure."""
+    """
+    Call CERATA v2 bridge. Returns the four real per-article dimensions:
+    ψ (internal consistency), ρ (wisdom depth), q (emotional activation),
+    f (social belonging).
+
+    τ and λ are NOT per-article values:
+    - τ (temporal depth) = rate of dimensional change between timeline points
+    - λ (lens interference) = divergence across sources seeing the same event
+    Both are derived after all articles on a date are scored.
+    """
     bridge_url = os.environ.get("CERATA_BRIDGE_URL", CERATA_BRIDGE_URL_DEFAULT)
     try:
         resp = requests.post(
@@ -198,15 +207,14 @@ def bridge_score(text: str, timeout: int = 15) -> Optional[dict]:
         rho = rho_d.get("wisdom_score", zones.get("rho", {}).get("A", 0.3))
         q = q_d.get("raw_q", q_d.get("optimized_q", zones.get("q", {}).get("A", 0.3)))
         f = f_d.get("belonging_score", zones.get("f", {}).get("A", 0.1))
-        tau = data.get("tau", 0.5)
-        lam = data.get("lambda", 0.3)
 
-        coherence = (psi * 0.25 + rho * 0.25 + (1 - abs(q - 0.5) * 2) * 0.2
-                     + f * 0.15 + tau * 0.1 + (1 - lam) * 0.05)
+        # Coherence from the four real dimensions only
+        coherence = (psi * 0.3 + rho * 0.3
+                     + (1 - abs(q - 0.5) * 2) * 0.2
+                     + f * 0.2)
 
         return {
             "psi": psi, "rho": rho, "q": q, "f": f,
-            "tau": tau, "lambda_val": lam,
             "coherence": round(coherence, 4),
             "compute_source": "cerata-nematocysts-v2",
         }
@@ -420,12 +428,32 @@ def score_single_point(topic: str, point_date: date,
     if not scored_dims:
         return None
 
-    # Average dimensions across scored articles
+    # Average the four real dimensions across scored articles
     n = len(scored_dims)
     avg = {}
-    for key in ("psi", "rho", "q", "f", "tau", "lambda_val", "coherence"):
+    for key in ("psi", "rho", "q", "f", "coherence"):
         vals = [d.get(key, 0) or 0 for d in scored_dims]
         avg[key] = round(sum(vals) / n, 4)
+
+    # λ (lens interference): how differently sources see the same event.
+    # Computed as mean standard deviation across ψ, ρ, q, f per-article scores.
+    # High λ = sources disagree dimensionally. Low λ = consensus.
+    if n >= 2:
+        dim_stds = []
+        for key in ("psi", "rho", "q", "f"):
+            vals = [d.get(key, 0) or 0 for d in scored_dims]
+            mean = sum(vals) / n
+            variance = sum((v - mean) ** 2 for v in vals) / n
+            dim_stds.append(math.sqrt(variance))
+        avg["lambda_val"] = round(sum(dim_stds) / len(dim_stds), 4)
+    else:
+        # Single source — no interference measurable
+        avg["lambda_val"] = 0.0
+
+    # τ (temporal depth): rate of dimensional change between points.
+    # Cannot be computed per-point in isolation — set to None here.
+    # Derived in compute_derived_dimensions() after all points are scored.
+    avg["tau"] = None
 
     avg["source_count"] = n
     avg["article_urls"] = urls
@@ -433,6 +461,89 @@ def score_single_point(topic: str, point_date: date,
     avg["provenance"] = provenance
     avg["compute_source"] = scored_dims[0].get("compute_source", "cerata-nematocysts-v2")
     return avg
+
+
+# ── Derived dimensions (τ, coherence update) ─────────────────────────────────
+
+def compute_derived_dimensions(conn, topic: str, start_date: date, end_date: date):
+    """
+    Second pass after all points are scored. Computes:
+
+    τ (temporal depth): How fast are ψ, ρ, q, f shifting between adjacent
+    points? Euclidean distance in 4D space normalized by time gap.
+    High τ = volatile coverage. Low τ = stable emphasis.
+
+    Also updates coherence to incorporate τ and λ now that they exist.
+    """
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        """SELECT id, point_date, psi, rho, q, f, lambda_val
+           FROM timeline_points
+           WHERE topic = %s AND point_date BETWEEN %s AND %s
+           ORDER BY point_date ASC""",
+        (topic.upper(), start_date, end_date)
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+
+    if len(rows) < 2:
+        return
+
+    update_cur = conn.cursor()
+
+    for i, row in enumerate(rows):
+        if i == 0:
+            # First point: no previous point to compare against.
+            # τ = 0 (no change measurable yet)
+            tau = 0.0
+        else:
+            prev = rows[i - 1]
+            # Euclidean distance in (ψ, ρ, q, f) space
+            d_psi = (row.get("psi") or 0) - (prev.get("psi") or 0)
+            d_rho = (row.get("rho") or 0) - (prev.get("rho") or 0)
+            d_q = (row.get("q") or 0) - (prev.get("q") or 0)
+            d_f = (row.get("f") or 0) - (prev.get("f") or 0)
+            euclidean = math.sqrt(d_psi**2 + d_rho**2 + d_q**2 + d_f**2)
+
+            # Normalize by time gap (days). Prevents monthly intervals
+            # from looking more volatile than daily ones.
+            days_gap = (row["point_date"] - prev["point_date"]).days
+            if days_gap > 0:
+                tau = euclidean / math.sqrt(days_gap)
+            else:
+                tau = euclidean
+
+            # Clamp to [0, 1] range
+            tau = min(tau, 1.0)
+
+        # Recompute coherence with all six dimensions now present
+        psi = row.get("psi") or 0
+        rho = row.get("rho") or 0
+        q = row.get("q") or 0
+        f = row.get("f") or 0
+        lam = row.get("lambda_val") or 0
+
+        # Coherence: four real dims + τ (stability bonus when low) +
+        # λ (consensus bonus when low)
+        coherence = (
+            psi * 0.25 + rho * 0.25
+            + (1 - abs(q - 0.5) * 2) * 0.15
+            + f * 0.15
+            + (1 - tau) * 0.1       # low temporal volatility = coherent
+            + (1 - lam) * 0.1       # low lens interference = consensus
+        )
+        coherence = round(max(0, min(1, coherence)), 4)
+
+        update_cur.execute(
+            """UPDATE timeline_points
+               SET tau = %s, coherence = %s
+               WHERE id = %s""",
+            (round(tau, 4), coherence, row["id"])
+        )
+
+    conn.commit()
+    update_cur.close()
+    print(f"[build] Derived τ for {len(rows)} points, coherence updated")
 
 
 # ── Build progress tracking ───────────────────────────────────────────────────
@@ -558,10 +669,16 @@ def build_timeline(topic: str, start_date: date, end_date: date) -> dict:
             except Exception:
                 pass
 
-    # Phase 3: Pattern extraction
+    # Phase 3: Compute derived dimensions (τ from point-to-point change,
+    # coherence update incorporating τ and λ)
+    derive_conn = get_db()
+    compute_derived_dimensions(derive_conn, topic, start_date, end_date)
+    derive_conn.close()
+
+    # Phase 4: Pattern extraction
     patterns = extract_patterns(conn, topic, start_date, end_date)
 
-    # Phase 4: Generate pattern summary via Sonnet (if enough data)
+    # Phase 5: Generate pattern summary via Sonnet (if enough data)
     pattern_summary = None
     if patterns and len(scored_points) >= 5:
         pattern_summary = generate_pattern_summary(topic, patterns,
